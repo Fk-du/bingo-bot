@@ -10,17 +10,19 @@ interface GameAreaProps {
   calledNumbers: number[];
   gameStatus: string | null;
   gameLoading: boolean;
+  onClaim: () => void;
   onJoin: () => void;
 }
 
-const GameArea: React.FC<GameAreaProps> = ({ 
-  currentGame, 
-  activeGameCard, 
-  cardDetails, 
-  calledNumbers, 
+const GameArea: React.FC<GameAreaProps> = ({
+  currentGame,
+  activeGameCard,
+  cardDetails,
+  calledNumbers,
   gameStatus,
   gameLoading,
-  onJoin 
+  onClaim,
+  onJoin
 }) => {
   if (!currentGame) {
     return (
@@ -37,30 +39,43 @@ const GameArea: React.FC<GameAreaProps> = ({
           {activeGameCard ? 'Your Bingo Card' : 'Game Status'}
         </h3>
         <div className="flex items-center gap-2">
-           <div className={`h-2 w-2 rounded-full ${currentGame.status === 'STARTED' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
-           <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
-             {gameStatus || currentGame.status}
-           </span>
+          <div
+            className={`h-2 w-2 rounded-full ${
+              currentGame.status === 'STARTED' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
+            }`}
+          />
+          <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+            {gameStatus || currentGame.status}
+          </span>
         </div>
       </div>
 
       {activeGameCard ? (
-        <BingoCard 
-          numbers={cardDetails[activeGameCard.cardId]?.numbers || ''} 
-          calledNumbers={calledNumbers} 
-        />
+        <div className="space-y-4">
+          {gameStatus === 'STARTED' && (
+            <button onClick={onClaim} className="btn-primary w-full py-4">
+              Claim Bingo
+            </button>
+          )}
+          <BingoCard
+            numbers={cardDetails[activeGameCard.cardId]?.numbers || ''}
+            calledNumbers={calledNumbers}
+          />
+        </div>
       ) : (
         <div className="glass-card p-8 text-center bg-purple-500/5">
           <QrCode size={40} className="mx-auto mb-4 text-slate-600" />
           <h4 className="font-bold mb-2">Join the Arena</h4>
-          <p className="text-sm text-slate-400 mb-6">Arena #{currentGame.id} is waiting for players. Join now to get your card!</p>
-          <button 
+          <p className="text-sm text-slate-400 mb-6">
+            Arena #{currentGame.id} is waiting for players. Join now to get your card!
+          </p>
+          <button
             onClick={onJoin}
             disabled={gameLoading}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             <Play size={18} fill="currentColor" />
-            {gameLoading ? 'Joining...' : 'Get My Card • ' + currentGame.entryFee + ' PTS'}
+            {gameLoading ? 'Joining...' : `Get My Card • ${currentGame.entryFee} PTS`}
           </button>
         </div>
       )}

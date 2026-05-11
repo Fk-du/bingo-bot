@@ -2,6 +2,7 @@ package com.bingo.app.modules.invite.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -108,7 +109,7 @@ class InviteServiceTest {
         when(userService.findByTelegramId(123L)).thenReturn(Optional.empty());
         when(inviteCodeRepository.findByCode("agent_live01")).thenReturn(Optional.of(invite));
         when(userRepository.findById(20L)).thenReturn(Optional.of(superAdmin));
-        when(userService.createAdmin(123L, 20L, BigDecimal.ZERO)).thenReturn(createdAdmin);
+        when(userService.createInvitedUser(123L, superAdmin)).thenReturn(createdAdmin);
 
         User actual = inviteService.registerWithInvite(123L, "agent_live01");
 
@@ -117,6 +118,90 @@ class InviteServiceTest {
         ArgumentCaptor<InviteCode> captor = ArgumentCaptor.forClass(InviteCode.class);
         verify(inviteCodeRepository).save(captor.capture());
         assertFalse(captor.getValue().isActive());
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void generateInviteLinkForPlayerUsesSameParentAgent() {
+        User player = User.builder()
+                .id(30L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(20L)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        User parentAdmin = User.builder()
+                .id(20L)
+                .telegramId(999L)
+                .role(Role.ADMIN)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(userRepository.findById(30L)).thenReturn(Optional.of(player));
+        when(userRepository.findById(20L)).thenReturn(Optional.of(parentAdmin));
+        when(inviteCodeRepository.existsByCode(any())).thenReturn(false);
+
+        String link = inviteService.generateInviteLinkForUser(30L, "botname");
+
+        assertTrue(link.startsWith("https://t.me/botname?start="));
+
+        ArgumentCaptor<InviteCode> captor = ArgumentCaptor.forClass(InviteCode.class);
+        verify(inviteCodeRepository).save(captor.capture());
+        assertEquals(20L, captor.getValue().getAdminId());
+    }
+
+    @Test
+    void registerWithInviteFromPlayerGeneratedLinkUsesSameParentAgent() {
+        User player = User.builder()
+                .id(30L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(20L)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        User parentAdmin = User.builder()
+                .id(20L)
+                .telegramId(999L)
+                .role(Role.ADMIN)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(userRepository.findById(30L)).thenReturn(Optional.of(player));
+        when(userRepository.findById(20L)).thenReturn(Optional.of(parentAdmin));
+        when(inviteCodeRepository.existsByCode(any())).thenReturn(false);
+
+        String inviteLink = inviteService.generateInviteLinkForUser(30L, "botname");
+        String inviteCode = inviteLink.substring(inviteLink.indexOf("start=") + 6);
+
+        InviteCode invite = InviteCode.builder()
+                .id(11L)
+                .code(inviteCode)
+                .adminId(20L)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        User createdPlayer = User.builder()
+                .id(40L)
+                .telegramId(555L)
+                .role(Role.PLAYER)
+                .parentId(20L)
+                .balance(BigDecimal.ZERO)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(userService.findByTelegramId(555L)).thenReturn(Optional.empty());
+        when(inviteCodeRepository.findByCode(inviteCode)).thenReturn(Optional.of(invite));
+        when(userRepository.findById(20L)).thenReturn(Optional.of(parentAdmin));
+        when(userService.createInvitedUser(555L, parentAdmin)).thenReturn(createdPlayer);
+
+        User actual = inviteService.registerWithInvite(555L, inviteCode);
+
+        assertEquals(createdPlayer, actual);
+        verify(userService).createInvitedUser(555L, parentAdmin);
     }
 
     @Test

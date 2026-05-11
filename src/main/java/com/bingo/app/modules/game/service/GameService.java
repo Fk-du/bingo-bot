@@ -92,6 +92,20 @@ public class GameService {
         return startedGame.isPresent() ? startedGame : findAdminWaitingGame(adminId);
     }
 
+    public Game requireAdminGame(Long adminId, Long gameId) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new GameProgressException("Game not found", "The game could not be found."));
+
+        if (!adminId.equals(game.getAdminId())) {
+            throw new GameProgressException(
+                    "Game ownership mismatch",
+                    "You can only manage games created under your account."
+            );
+        }
+
+        return game;
+    }
+
     public Game startCurrentGameForAdmin(Long adminId) {
         Game startedGame = findAdminStartedGame(adminId).orElse(null);
         if (startedGame != null) {
@@ -111,6 +125,37 @@ public class GameService {
 
         Game saved = gameRepository.save(waitingGame);
         messagingTemplate.convertAndSend("/topic/game/" + saved.getId() + "/status", GameStatus.STARTED);
+        return saved;
+    }
+
+    public Game startGameForAdmin(Long adminId, Long gameId) {
+        Game game = requireAdminGame(adminId, gameId);
+        if (game.getStatus() == GameStatus.STARTED) {
+            throw new GameProgressException(
+                    "Game already started",
+                    "This game is already started."
+            );
+        }
+
+        game.setStatus(GameStatus.STARTED);
+        game.setStartTime(LocalDateTime.now());
+        Game saved = gameRepository.save(game);
+        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.STARTED);
+        return saved;
+    }
+
+    public Game endGameForAdmin(Long adminId, Long gameId) {
+        Game game = requireAdminGame(adminId, gameId);
+        if (game.getStatus() == GameStatus.ENDED) {
+            throw new GameProgressException(
+                    "Game already ended",
+                    "This game is already ended."
+            );
+        }
+
+        game.setStatus(GameStatus.ENDED);
+        Game saved = gameRepository.save(game);
+        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.ENDED);
         return saved;
     }
 

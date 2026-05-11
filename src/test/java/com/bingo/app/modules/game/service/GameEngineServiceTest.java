@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -70,6 +71,16 @@ class GameEngineServiceTest {
 
     @Test
     void callNumberUsesOnlyRemainingNumbers() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(2L)
+                .status(GameStatus.STARTED)
+                .entryFee(BigDecimal.TEN)
+                .maxPlayers(10)
+                .startTime(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .build();
+
         List<CalledNumber> called = java.util.stream.IntStream.rangeClosed(1, 74)
                 .mapToObj(number -> CalledNumber.builder()
                         .id((long) number)
@@ -79,6 +90,7 @@ class GameEngineServiceTest {
                         .build())
                 .toList();
 
+        when(gameRepository.findById(10L)).thenReturn(java.util.Optional.of(game));
         when(calledNumberRepository.findByGameId(10L)).thenReturn(called);
 
         Integer actual = gameEngineService.callNumber(10L);
@@ -89,6 +101,16 @@ class GameEngineServiceTest {
 
     @Test
     void callNumberRejectsWhenAllNumbersAreExhausted() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(2L)
+                .status(GameStatus.STARTED)
+                .entryFee(BigDecimal.TEN)
+                .maxPlayers(10)
+                .startTime(LocalDateTime.now())
+                .createdAt(LocalDateTime.now())
+                .build();
+
         List<CalledNumber> called = java.util.stream.IntStream.rangeClosed(1, 75)
                 .mapToObj(number -> CalledNumber.builder()
                         .id((long) number)
@@ -98,6 +120,7 @@ class GameEngineServiceTest {
                         .build())
                 .toList();
 
+        when(gameRepository.findById(10L)).thenReturn(java.util.Optional.of(game));
         when(calledNumberRepository.findByGameId(10L)).thenReturn(called);
 
         GameProgressException ex = assertThrows(
@@ -213,7 +236,7 @@ class GameEngineServiceTest {
         assertEquals(winner, actual);
         verify(gameCardRepository).save(claimantCard);
         verify(winnerService).distributeRewards(10L, BigDecimal.valueOf(20), List.of(winner));
-        verify(gameRepository).save(any(Game.class));
+        verify(gameRepository, times(2)).save(any(Game.class));
     }
 
     @Test

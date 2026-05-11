@@ -1,8 +1,9 @@
-package com.bingo.app.modules.user.controller;
+package com.bingo.app.modules.game.controller;
 
 import com.bingo.app.modules.invite.service.InviteService;
 import com.bingo.app.modules.user.enums.Role;
 import com.bingo.app.modules.wallet.service.WalletService;
+import com.bingo.app.modules.wallet.entity.Transaction;
 import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -28,13 +29,13 @@ public class SuperAdminController {
     @PostMapping("/agents/create")
     public ResponseEntity<String> createAgent(@AuthenticationPrincipal User superUser, @RequestParam String botUsername) {
         // Logic to generate an invitation code for a new agent
-        String inviteLink = inviteService.generateInviteLink(superUser.getId(), botUsername);
+        String inviteLink = inviteService.generateInviteLinkForUser(superUser.getId(), botUsername);
         return ResponseEntity.ok(inviteLink);
     }
 
     @PostMapping("/agents/{id}/fund")
     public ResponseEntity<Void> fundAgent(@AuthenticationPrincipal User superUser, @PathVariable Long id, @RequestParam BigDecimal amount) {
-        walletService.transferPoints(superUser.getId(), id, amount);
+        walletService.fundAgent(superUser.getId(), id, amount);
         return ResponseEntity.ok().build();
     }
 
@@ -56,9 +57,8 @@ public class SuperAdminController {
     }
 
     @GetMapping("/transactions")
-    public ResponseEntity<List<Object>> getAllTransactions() {
-        // Implementation for transactions
-        return ResponseEntity.ok().build();
+    public ResponseEntity<List<Transaction>> getAllTransactions() {
+        return ResponseEntity.ok(walletService.getAllTransactions());
     }
 
     @PutMapping("/settings")

@@ -30,7 +30,7 @@ public class SuperAdminBotHandler {
     private void handleCreateAgent(CallbackContext ctx) {
         try {
             String botUsername = ctx.getBot().getBotUsername();
-            String inviteLink = inviteService.generateInviteLink(ctx.getUser().getId(), botUsername);
+            String inviteLink = inviteService.generateInviteLinkForUser(ctx.getUser().getId(), botUsername);
             
             String msg = "🚀 *New Agent Invite Link Generated*\n\n" +
                          "Share this link with the person who will become an agent:\n" +

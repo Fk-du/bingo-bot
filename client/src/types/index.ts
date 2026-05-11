@@ -1,5 +1,5 @@
 export type Role = 'PLAYER' | 'ADMIN' | 'SUPER_ADMIN';
-export type GameStatus = 'WAITING' | 'STARTED' | 'ENDED';
+export type GameStatus = 'WAITING' | 'STARTED' | 'CLAIM_PENDING' | 'ENDED';
 
 export interface User {
   id: number;
@@ -33,7 +33,27 @@ export interface Card {
   used: boolean;
 }
 
+export type CardDetail = Card;
+
+export interface Transaction {
+  id: number;
+  userId: number;
+  type: string;
+  amount: number;
+  status: string;
+  approvedBy?: number | null;
+  proofImageFileId?: string | null;
+  createdAt: string;
+}
+
+export interface Winner {
+  id: number;
+  gameId: number;
+  playerId: number;
+  cardId: number;
+  rewardAmount: number;
+}
+
 export interface AuthResponse {
-  token: string;
   user: User;
 }

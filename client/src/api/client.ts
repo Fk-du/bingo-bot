@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { retrieveRawInitData } from '@telegram-apps/sdk';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api/v1';
 
@@ -9,10 +10,27 @@ const apiClient = axios.create({
   },
 });
 
+const getTelegramInitData = () => {
+  const rawInitData = retrieveRawInitData();
+  if (rawInitData) {
+    return rawInitData;
+  }
+
+  const webApp = (window as typeof window & {
+    Telegram?: {
+      WebApp?: {
+        initData?: string;
+      };
+    };
+  }).Telegram?.WebApp;
+
+  return webApp?.initData || '';
+};
+
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('bingo_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const initData = getTelegramInitData();
+  if (initData) {
+    config.headers.Authorization = initData;
   }
   return config;
 });

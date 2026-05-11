@@ -41,28 +41,41 @@ public class InviteService {
         User parentUser = userRepository.findById(invite.getAdminId())
                 .orElseThrow(InviteRegistrationException::inviterNotFound);
 
-        User createdUser;
-
-        if (parentUser.getRole() == Role.SUPER_ADMIN) {
-            createdUser = userService.createAdmin(telegramId, parentUser.getId(), BigDecimal.ZERO);
-        } else if (parentUser.getRole() == Role.ADMIN) {
-            createdUser = userService.createPlayer(telegramId, parentUser.getId());
-        } else {
+        if (parentUser.getRole() == Role.PLAYER) {
             throw InviteRegistrationException.invalidInviterRole();
         }
 
+        User createdUser = userService.createInvitedUser(telegramId, parentUser);
         invite.setActive(false);
         inviteCodeRepository.save(invite);
 
         return createdUser;
     }
 
-    public String generateInviteLink(Long adminId, String botUsername) {
+    public String generateInviteLinkForUser(Long inviterUserId, String botUsername) {
+        User inviter = userRepository.findById(inviterUserId)
+                .orElseThrow(InviteRegistrationException::inviterNotFound);
+
+        Long effectiveParentId = inviter.getRole() == Role.PLAYER
+                ? inviter.getParentId()
+                : inviter.getId();
+
+        if (effectiveParentId == null) {
+            throw InviteRegistrationException.invalidInviterRole();
+        }
+
+        User effectiveParent = userRepository.findById(effectiveParentId)
+                .orElseThrow(InviteRegistrationException::inviterNotFound);
+
+        if (effectiveParent.getRole() == Role.PLAYER) {
+            throw InviteRegistrationException.invalidInviterRole();
+        }
+
         String code = buildUniqueCode();
 
         InviteCode invite = InviteCode.builder()
                 .code(code)
-                .adminId(adminId)
+                .adminId(effectiveParent.getId())
                 .active(true)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -70,12 +83,6 @@ public class InviteService {
         inviteCodeRepository.save(invite);
 
         return "https://t.me/" + botUsername + "?start=" + code;
-    }
-
-    public String createAdminWithInvite(Long telegramId, Long parentId, String botUsername) {
-        User admin = userService.createAdmin(telegramId, parentId, BigDecimal.ZERO);
-
-        return generateInviteLink(admin.getId(), botUsername);
     }
 
     private String buildUniqueCode() {

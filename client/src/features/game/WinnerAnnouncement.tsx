@@ -1,13 +1,19 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Trophy } from 'lucide-react';
+import type { Winner } from '../../types';
 
 interface WinnerProps {
-  winner: any;
+  winner: Winner | Winner[] | null;
 }
 
 const WinnerAnnouncement: React.FC<WinnerProps> = ({ winner }) => {
   if (!winner) return null;
+
+  const winners = Array.isArray(winner) ? winner : [winner];
+  const winnerLabel = winners.length === 1
+    ? `Player #${winners[0].playerId} won the game!`
+    : `${winners.length} players split the prize: ${winners.map((item) => `#${item.playerId}`).join(', ')}`;
 
   return (
     <motion.div 
@@ -21,7 +27,7 @@ const WinnerAnnouncement: React.FC<WinnerProps> = ({ winner }) => {
        </div>
        <div>
           <h4 className="text-sm font-black text-yellow-500 uppercase italic">Bingo Winner!</h4>
-          <p className="text-xs text-white">Player #{winner.playerId} won the game!</p>
+          <p className="text-xs text-white">{winnerLabel}</p>
        </div>
        <button 
         onClick={() => window.location.reload()}

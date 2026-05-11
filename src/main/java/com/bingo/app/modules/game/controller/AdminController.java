@@ -38,34 +38,50 @@ public class AdminController {
     }
 
     @PostMapping("/games/{id}/start")
-    public ResponseEntity<Game> startGame(@PathVariable Long id) {
-        gameService.startGame(id);
+    public ResponseEntity<Game> startGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        Game game = gameService.startGameForAdmin(admin.getId(), id);
         gameEngineService.startCalling(id);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(game);
     }
 
     @PostMapping("/games/{id}/pause")
-    public ResponseEntity<Void> pauseGame(@PathVariable Long id) {
+    public ResponseEntity<Void> pauseGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        gameService.requireAdminGame(admin.getId(), id);
         gameEngineService.pauseCalling(id);
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/games/{id}/resume")
-    public ResponseEntity<Void> resumeGame(@PathVariable Long id) {
+    public ResponseEntity<Void> resumeGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        gameService.requireAdminGame(admin.getId(), id);
         gameEngineService.resumeCalling(id);
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/games/{id}/end")
+    public ResponseEntity<Game> endGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        Game game = gameService.endGameForAdmin(admin.getId(), id);
+        gameEngineService.stopCalling(id);
+        return ResponseEntity.ok(game);
+    }
+
     @PostMapping("/games/{id}/reject-player")
-    public ResponseEntity<Void> rejectPlayer(@PathVariable Long id, @RequestParam Long playerId) {
+    public ResponseEntity<Void> rejectPlayer(@AuthenticationPrincipal User admin, @PathVariable Long id, @RequestParam Long playerId) {
+        gameService.requireAdminGame(admin.getId(), id);
         // gameService.rejectPlayer(id, playerId); // To be implemented
         return ResponseEntity.ok().build();
     }
 
     @GetMapping("/games/status")
-    public ResponseEntity<Object> getGameStatus(@RequestParam Long gameId) {
-        // return ResponseEntity.ok(gameService.getStatus(gameId));
-        return ResponseEntity.ok().build();
+    public ResponseEntity<Game> getGameStatus(@AuthenticationPrincipal User admin, @RequestParam Long gameId) {
+        return ResponseEntity.ok(gameService.requireAdminGame(admin.getId(), gameId));
+    }
+
+    @GetMapping("/game/current")
+    public ResponseEntity<Game> getCurrentGame(@AuthenticationPrincipal User admin) {
+        return gameService.findCurrentGameForAdmin(admin.getId())
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.noContent().build());
     }
 
     // --- Player Management ---
@@ -88,6 +104,11 @@ public class AdminController {
         return ResponseEntity.ok(walletService.getPendingWithdrawsForAdminPlayers(admin.getId()));
     }
 
+    @GetMapping("/transactions")
+    public ResponseEntity<List<Transaction>> getTransactions(@AuthenticationPrincipal User admin) {
+        return ResponseEntity.ok(walletService.getTransactionsForAdminPlayers(admin.getId()));
+    }
+
     @PostMapping("/withdrawals/{id}/approve")
     public ResponseEntity<Void> approveWithdrawal(@AuthenticationPrincipal User admin, @PathVariable Long id) {
         walletService.approveWithdrawRequest(admin.getId(), id);
@@ -104,6 +125,6 @@ public class AdminController {
 
     @GetMapping("/invite-link")
     public ResponseEntity<String> getInviteLink(@AuthenticationPrincipal User admin, @RequestParam String botUsername) {
-        return ResponseEntity.ok(inviteService.generateInviteLink(admin.getId(), botUsername));
+        return ResponseEntity.ok(inviteService.generateInviteLinkForUser(admin.getId(), botUsername));
     }
 }

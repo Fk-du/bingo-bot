@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { gameApi, cardApi } from '../api/services';
-import type { Game, GameCard, Card } from '../types';
+import { adminGameApi, cardApi, gameApi } from '../api/services';
+import type { Game, GameCard, Card, Role } from '../types';
 
-export const useGame = () => {
+export const useGame = (role?: Role | null) => {
   const [currentGame, setCurrentGame] = useState<Game | null>(null);
   const [myCards, setMyCards] = useState<GameCard[]>([]);
   const [cardDetails, setCardDetails] = useState<Record<number, Card>>({});
@@ -11,20 +11,34 @@ export const useGame = () => {
   const fetchGameData = async () => {
     try {
       setLoading(true);
-      const [game, cards] = await Promise.all([
-        gameApi.getCurrentGame(),
-        gameApi.getMyCards()
-      ]);
-      setCurrentGame(game);
-      setMyCards(cards);
+      if (role === 'PLAYER') {
+        const [game, cards] = await Promise.all([
+          gameApi.getCurrentGame(),
+          gameApi.getMyCards()
+        ]);
+        setCurrentGame(game);
+        setMyCards(cards);
 
-      // Fetch details for all cards
-      const details: Record<number, Card> = {};
-      await Promise.all(cards.map(async (gc) => {
-        const detail = await cardApi.getCard(gc.cardId);
-        details[gc.cardId] = detail;
-      }));
-      setCardDetails(details);
+        const details: Record<number, Card> = {};
+        await Promise.all(cards.map(async (gc) => {
+          const detail = await cardApi.getCard(gc.cardId);
+          details[gc.cardId] = detail;
+        }));
+        setCardDetails(details);
+        return;
+      }
+
+      if (role === 'ADMIN') {
+        const game = await adminGameApi.getCurrentGame();
+        setCurrentGame(game);
+        setMyCards([]);
+        setCardDetails({});
+        return;
+      }
+
+      setCurrentGame(null);
+      setMyCards([]);
+      setCardDetails({});
     } catch (err) {
       console.error('Failed to fetch game data', err);
     } finally {
@@ -52,8 +66,7 @@ export const useGame = () => {
 
   useEffect(() => {
     fetchGameData();
-  }, []);
+  }, [role]);
 
   return { currentGame, myCards, cardDetails, loading, fetchGameData, joinGame };
 };
-

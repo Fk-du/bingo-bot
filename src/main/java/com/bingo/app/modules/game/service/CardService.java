@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import com.bingo.app.modules.game.entity.Game;
+import com.bingo.app.modules.game.enums.GameStatus;
 import com.bingo.app.exception.PlayerActionException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,10 @@ import com.bingo.app.modules.game.entity.Card;
 import com.bingo.app.modules.game.entity.GameCard;
 import com.bingo.app.modules.game.repository.CardRepository;
 import com.bingo.app.modules.game.repository.GameCardRepository;
+import com.bingo.app.modules.game.repository.GameRepository;
+import com.bingo.app.modules.user.entity.User;
+import com.bingo.app.modules.user.enums.Role;
+import com.bingo.app.modules.user.repository.UserRepository;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +32,8 @@ public class CardService {
 
     private final CardRepository cardRepository;
     private final GameCardRepository gameCardRepository;
+    private final GameRepository gameRepository;
+    private final UserRepository userRepository;
 
     @Value("${bingo.card-size:25}")
     private int cardSize;
@@ -77,6 +85,30 @@ public class CardService {
 
     @Transactional
     public GameCard assignCard(Long gameId, Long playerId) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new PlayerActionException("Game not found", "The selected game could not be found."));
+
+        User player = userRepository.findById(playerId)
+                .orElseThrow(() -> new PlayerActionException("Player not found", "Your account could not be found."));
+
+        if (player.getRole() != Role.PLAYER) {
+            throw new PlayerActionException("Invalid player role", "Only players can join a bingo game.");
+        }
+
+        if (player.getParentId() == null || !player.getParentId().equals(game.getAdminId())) {
+            throw new PlayerActionException(
+                    "Game ownership mismatch",
+                    "You can only join games created by your assigned agent."
+            );
+        }
+
+        if (game.getStatus() != GameStatus.WAITING) {
+            throw new PlayerActionException(
+                    "Game is not open",
+                    "This game is no longer accepting new players."
+            );
+        }
+
         if (hasCardForGame(gameId, playerId)) {
             throw new PlayerActionException(
                     "Player already has a card in the game",

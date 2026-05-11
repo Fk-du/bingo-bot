@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.List;
 
+import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.enums.Role;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -12,7 +13,6 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
-import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.repository.UserRepository;
 
 @Service
@@ -22,16 +22,7 @@ public class UserService implements UserDetailsService {
     private final UserRepository userRepository;
 
     public User createPlayer(Long telegramId, Long parentId) {
-        User user = User.builder()
-                .telegramId(telegramId)
-                .role(Role.PLAYER)
-                .parentId(parentId)
-                .balance(BigDecimal.ZERO)
-                .active(true)
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        return userRepository.save(user);
+        return createUser(telegramId, Role.PLAYER, parentId, BigDecimal.ZERO);
     }
 
     public Optional<User> findByTelegramId(Long telegramId) {
@@ -39,31 +30,36 @@ public class UserService implements UserDetailsService {
     }
 
     public User createAdmin(Long telegramId, Long parentId, BigDecimal initialBalance) {
-
-        User admin = User.builder()
-                .telegramId(telegramId)
-                .role(Role.ADMIN)
-                .parentId(parentId)
-                .balance(initialBalance)
-                .active(true)
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        return userRepository.save(admin);
+        return createUser(telegramId, Role.ADMIN, parentId, initialBalance);
     }
 
+    public User createInvitedUser(Long telegramId, User inviter) {
+        if (inviter == null) {
+            throw new IllegalStateException("Inviter not found.");
+        }
+
+        if (inviter.getRole() == Role.SUPER_ADMIN) {
+            return createAdmin(telegramId, inviter.getId(), BigDecimal.ZERO);
+        }
+
+        if (inviter.getRole() == Role.ADMIN) {
+            return createPlayer(telegramId, inviter.getId());
+        }
+
+        if (inviter.getRole() == Role.PLAYER) {
+            return createPlayer(telegramId, inviter.getParentId());
+        }
+
+        throw new IllegalStateException("Only super admins and admins can invite users.");
+    }
+
+    public User requireUser(Long telegramId) {
+        return findByTelegramId(telegramId)
+                .orElseThrow(() -> new IllegalStateException("User not found with telegramId: " + telegramId));
+    }
 
     public User createSuperAdmin(Long telegramId) {
-        User superAdmin = User.builder()
-                .telegramId(telegramId)
-                .role(Role.SUPER_ADMIN)
-                .parentId(null)
-                .balance(BigDecimal.ZERO)
-                .active(true)
-                .createdAt(LocalDateTime.now())
-                .build();
-
-        return userRepository.save(superAdmin);
+        return createUser(telegramId, Role.SUPER_ADMIN, null, BigDecimal.ZERO);
     }
 
     public User ensureSuperAdmin(Long telegramId) {
@@ -91,5 +87,18 @@ public class UserService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         return userRepository.findByTelegramId(Long.valueOf(username))
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with telegramId: " + username));
+    }
+
+    private User createUser(Long telegramId, Role role, Long parentId, BigDecimal balance) {
+        User user = User.builder()
+                .telegramId(telegramId)
+                .role(role)
+                .parentId(parentId)
+                .balance(balance == null ? BigDecimal.ZERO : balance)
+                .active(true)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return userRepository.save(user);
     }
 }

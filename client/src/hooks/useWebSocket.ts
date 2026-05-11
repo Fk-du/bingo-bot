@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Client, IMessage } from '@stomp/stompjs';
+import { useEffect, useRef, useState } from 'react';
+import { Client } from '@stomp/stompjs';
+import type { IMessage } from '@stomp/stompjs';
 import SockJS from 'sockjs-client';
+import type { Winner } from '../types';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'http://localhost:8080/ws';
 
@@ -9,7 +11,7 @@ export const useWebSocket = (gameId?: number) => {
   const [connected, setConnected] = useState(false);
   const [lastNumber, setLastNumber] = useState<number | null>(null);
   const [gameStatus, setGameStatus] = useState<string | null>(null);
-  const [winner, setWinner] = useState<any>(null);
+  const [winner, setWinner] = useState<Winner | Winner[] | null>(null);
 
   useEffect(() => {
     if (!gameId) return;
@@ -22,7 +24,7 @@ export const useWebSocket = (gameId?: number) => {
       heartbeatOutgoing: 4000,
     });
 
-    client.onConnect = (frame) => {
+    client.onConnect = () => {
       console.log('Connected to WS');
       setConnected(true);
 

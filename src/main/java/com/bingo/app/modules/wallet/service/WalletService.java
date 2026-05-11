@@ -29,6 +29,25 @@ public class WalletService {
         User fromUser = userRepository.findById(fromUserId).orElseThrow();
         User toUser = userRepository.findById(toUserId).orElseThrow();
 
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new PlayerActionException("Invalid amount", "Amount must be greater than zero.");
+        }
+
+        boolean directHierarchyTransfer =
+                (fromUser.getRole() == Role.SUPER_ADMIN
+                        && toUser.getRole() == Role.ADMIN
+                        && fromUser.getId().equals(toUser.getParentId()))
+                || (fromUser.getRole() == Role.ADMIN
+                        && toUser.getRole() == Role.PLAYER
+                        && fromUser.getId().equals(toUser.getParentId()));
+
+        if (!directHierarchyTransfer) {
+            throw new PlayerActionException(
+                    "Ownership mismatch",
+                    "You can only transfer points to direct children in your hierarchy."
+            );
+        }
+
         if (fromUser.getBalance().compareTo(amount) < 0) {
             throw new PlayerActionException("Insufficient balance", "You do not have enough points to transfer.");
         }
@@ -41,7 +60,7 @@ public class WalletService {
 
         Transaction tx = Transaction.builder()
                 .userId(toUserId)
-                .type(TransactionType.AGENT_FUND) // Use appropriate type
+                .type(toUser.getRole() == Role.ADMIN ? TransactionType.AGENT_FUND : TransactionType.PLAYER_FUND)
                 .amount(amount)
                 .status(TransactionStatus.APPROVED)
                 .approvedBy(fromUserId)
@@ -205,6 +224,16 @@ public class WalletService {
 
     public List<Transaction> getHistory(Long userId) {
         return transactionRepository.findByUserId(userId);
+    }
+
+    public List<Transaction> getTransactionsForAdminPlayers(Long adminId) {
+        List<User> players = userRepository.findByParentIdAndRole(adminId, Role.PLAYER);
+        if (players.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> playerIds = players.stream().map(User::getId).toList();
+        return transactionRepository.findByUserIdIn(playerIds);
     }
 
     public List<Transaction> getAllTransactions() {

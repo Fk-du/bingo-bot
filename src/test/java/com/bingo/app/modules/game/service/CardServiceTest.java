@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Optional;
 
 import com.bingo.app.exception.PlayerActionException;
+import com.bingo.app.modules.game.enums.GameStatus;
+import com.bingo.app.modules.user.enums.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,9 +26,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.bingo.app.modules.game.entity.Card;
+import com.bingo.app.modules.game.entity.Game;
 import com.bingo.app.modules.game.entity.GameCard;
 import com.bingo.app.modules.game.repository.CardRepository;
 import com.bingo.app.modules.game.repository.GameCardRepository;
+import com.bingo.app.modules.game.repository.GameRepository;
+import com.bingo.app.modules.user.entity.User;
+import com.bingo.app.modules.user.repository.UserRepository;
 import com.bingo.app.modules.game.service.CardService;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +44,12 @@ class CardServiceTest {
     @Mock
     private GameCardRepository gameCardRepository;
 
+    @Mock
+    private GameRepository gameRepository;
+
+    @Mock
+    private UserRepository userRepository;
+
     @InjectMocks
     private CardService cardService;
 
@@ -48,6 +60,19 @@ class CardServiceTest {
 
     @Test
     void assignCardRejectsDuplicatePlayerCardInGame() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(100L)
+                .status(GameStatus.WAITING)
+                .build();
+
+        User player = User.builder()
+                .id(5L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(100L)
+                .build();
+
         GameCard existing = GameCard.builder()
                 .id(20L)
                 .gameId(10L)
@@ -56,6 +81,8 @@ class CardServiceTest {
                 .winner(false)
                 .build();
 
+        when(gameRepository.findById(10L)).thenReturn(Optional.of(game));
+        when(userRepository.findById(5L)).thenReturn(Optional.of(player));
         when(gameCardRepository.findByGameIdAndPlayerId(10L, 5L)).thenReturn(List.of(existing));
 
         PlayerActionException ex = assertThrows(
@@ -67,7 +94,46 @@ class CardServiceTest {
     }
 
     @Test
+    void assignCardRejectsPlayersFromAnotherAgentTree() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(100L)
+                .status(GameStatus.WAITING)
+                .build();
+
+        User player = User.builder()
+                .id(5L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(200L)
+                .build();
+
+        when(gameRepository.findById(10L)).thenReturn(Optional.of(game));
+        when(userRepository.findById(5L)).thenReturn(Optional.of(player));
+
+        PlayerActionException ex = assertThrows(
+                PlayerActionException.class,
+                () -> cardService.assignCard(10L, 5L)
+        );
+
+        assertEquals("You can only join games created by your assigned agent.", ex.getUserMessage());
+    }
+
+    @Test
     void assignCardCreatesCardOnDemandWhenNoUnusedCardExists() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(100L)
+                .status(GameStatus.WAITING)
+                .build();
+
+        User player = User.builder()
+                .id(5L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(100L)
+                .build();
+
         Card newCard = Card.builder()
                 .id(40L)
                 .numbers("1,2,3")
@@ -82,6 +148,8 @@ class CardServiceTest {
                 .winner(false)
                 .build();
 
+        when(gameRepository.findById(10L)).thenReturn(Optional.of(game));
+        when(userRepository.findById(5L)).thenReturn(Optional.of(player));
         when(gameCardRepository.findByGameIdAndPlayerId(10L, 5L)).thenReturn(List.of());
         when(cardRepository.findFirstByUsedFalse()).thenReturn(Optional.empty());
         when(cardRepository.save(any(Card.class))).thenReturn(newCard);

@@ -30,7 +30,7 @@ public class AdminBotHandler {
     private void handleInviteLink(CallbackContext ctx) {
         try {
             String botUsername = ctx.getBot().getBotUsername();
-            String inviteLink = inviteService.generateInviteLink(ctx.getUser().getId(), botUsername);
+            String inviteLink = inviteService.generateInviteLinkForUser(ctx.getUser().getId(), botUsername);
             
             String msg = "👤 *Player Invite Link Generated*\n\n" +
                          "Share this link with players you want to recruit:\n" +

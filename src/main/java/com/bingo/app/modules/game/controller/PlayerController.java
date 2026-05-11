@@ -2,6 +2,7 @@ package com.bingo.app.modules.game.controller;
 
 import com.bingo.app.modules.game.entity.Game;
 import com.bingo.app.modules.game.entity.GameCard;
+import com.bingo.app.modules.invite.service.InviteService;
 import com.bingo.app.modules.game.service.GameService;
 import com.bingo.app.modules.game.service.CardService;
 import com.bingo.app.modules.user.entity.User;
@@ -28,10 +29,15 @@ public class PlayerController {
     private final CardService cardService;
     private final GameEngineService gameEngineService;
     private final WalletService walletService;
+    private final InviteService inviteService;
 
     @GetMapping("/game/current")
-    public ResponseEntity<Game> getCurrentGame() {
-        return gameService.findCurrentGame()
+    public ResponseEntity<Game> getCurrentGame(@AuthenticationPrincipal User user) {
+        if (user.getParentId() == null) {
+            return ResponseEntity.noContent().build();
+        }
+
+        return gameService.findCurrentGameForAdmin(user.getParentId())
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.noContent().build());
     }
@@ -70,6 +76,11 @@ public class PlayerController {
         return ResponseEntity.ok(user.getBalance());
     }
 
+    @GetMapping("/history")
+    public ResponseEntity<List<Transaction>> getHistory(@AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(walletService.getHistory(user.getId()));
+    }
+
     @PostMapping("/points/buy")
     public ResponseEntity<Transaction> buyPoints(@AuthenticationPrincipal User user, @RequestParam BigDecimal amount) {
         return ResponseEntity.ok(walletService.buyPoints(user.getId(), amount, null));
@@ -78,5 +89,10 @@ public class PlayerController {
     @PostMapping("/withdraw")
     public ResponseEntity<Transaction> withdrawRequest(@AuthenticationPrincipal User user, @RequestParam BigDecimal amount) {
         return ResponseEntity.ok(walletService.createWithdrawRequest(user.getId(), amount, null));
+    }
+
+    @GetMapping("/invite-link")
+    public ResponseEntity<String> getInviteLink(@AuthenticationPrincipal User user, @RequestParam String botUsername) {
+        return ResponseEntity.ok(inviteService.generateInviteLinkForUser(user.getId(), botUsername));
     }
 }

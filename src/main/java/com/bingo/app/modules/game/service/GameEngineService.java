@@ -42,11 +42,16 @@ public class GameEngineService {
     private final SimpMessagingTemplate messagingTemplate;
     private final WinnerRepository winnerRepository;
 
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "bingo-number-caller");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final Map<Long, ScheduledFuture<?>> taskMap = new ConcurrentHashMap<>();
+    private final Map<Long, Object> claimLocks = new ConcurrentHashMap<>();
 
     @Value("${bingo.auto-call-interval-ms:5000}")
-    private long autoCallInterval;
+    private long autoCallInterval = 5000L;
 
     @Value("${bingo.number-range:75}")
     private int numberRange;
@@ -57,8 +62,9 @@ public class GameEngineService {
     private final Random random = new Random();
 
     public Integer callNumber(Long gameId) {
-        Game game = gameRepository.findById(gameId).orElseThrow();
-        if (game.getStatus() == GameStatus.ENDED) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new GameProgressException("Game not found", "The game could not be found."));
+        if (game.getStatus() != GameStatus.STARTED) {
             stopCalling(gameId);
             return null;
         }
@@ -75,7 +81,10 @@ public class GameEngineService {
 
         if (remainingNumbers.isEmpty()) {
             stopCalling(gameId);
-            return null;
+            throw new GameProgressException(
+                    "All bingo numbers have already been called for this game.",
+                    "All bingo numbers have already been called for this game."
+            );
         }
 
         int number = remainingNumbers.get(random.nextInt(remainingNumbers.size()));
@@ -132,59 +141,109 @@ public class GameEngineService {
     }
 
     public Winner claimBingo(Long gameId, Long playerId) {
-        Game game = gameRepository.findById(gameId)
-                .orElseThrow(() -> new GameProgressException("Game not found", "The game could not be found."));
+        Object lock = claimLocks.computeIfAbsent(gameId, ignored -> new Object());
 
-        if (game.getStatus() != GameStatus.STARTED) {
-            throw new GameProgressException(
-                    "Game is not started",
-                    "This game is not active. Ask the admin to start the game first."
-            );
+        synchronized (lock) {
+            Game game = gameRepository.findById(gameId)
+                    .orElseThrow(() -> new GameProgressException("Game not found", "The game could not be found."));
+
+            if (game.getStatus() == GameStatus.ENDED) {
+                throw new GameProgressException(
+                        "Game already has a winner",
+                        "This game already has a winner and is no longer accepting claims."
+                );
+            }
+
+            if (game.getStatus() != GameStatus.STARTED && game.getStatus() != GameStatus.CLAIM_PENDING) {
+                throw new GameProgressException(
+                        "Game is not started",
+                        "This game is not active. Ask the admin to start the game first."
+                );
+            }
+
+            if (!winnerRepository.findByGameId(gameId).isEmpty()) {
+                throw new GameProgressException(
+                        "Game already has a winner",
+                        "This game already has a winner and is no longer accepting claims."
+                );
+            }
+
+            GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
+                    .stream()
+                    .findFirst()
+                    .orElseThrow(() -> new PlayerActionException(
+                            "Player has no card for the game",
+                            "You do not have a card in the current started game."
+                    ));
+
+            Card card = cardRepository.findById(gameCard.getCardId())
+                    .orElseThrow(() -> new PlayerActionException("Card not found", "Your card could not be loaded."));
+
+            boolean enteringClaimWindow = game.getStatus() == GameStatus.STARTED;
+            if (enteringClaimWindow) {
+                game.setStatus(GameStatus.CLAIM_PENDING);
+                gameRepository.save(game);
+                messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.CLAIM_PENDING);
+                stopCalling(gameId);
+            }
+
+            List<Integer> calledNumbers = getCalledNumbers(gameId);
+            if (!isWinningCard(card, calledNumbers)) {
+                game.setStatus(GameStatus.STARTED);
+                gameRepository.save(game);
+                messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.STARTED);
+                resumeCalling(gameId);
+
+                throw new PlayerActionException(
+                        "Card does not match a winning pattern",
+                        "Your card does not have a valid bingo pattern yet."
+                );
+            }
+
+            List<GameCard> winningCards = gameCardRepository.findByGameId(gameId).stream()
+                    .filter(gc -> {
+                        Card gameCardEntity = cardRepository.findById(gc.getCardId()).orElse(null);
+                        return gameCardEntity != null && isWinningCard(gameCardEntity, calledNumbers);
+                    })
+                    .toList();
+
+            if (winningCards.isEmpty()) {
+                game.setStatus(GameStatus.STARTED);
+                gameRepository.save(game);
+                messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.STARTED);
+                resumeCalling(gameId);
+
+                throw new PlayerActionException(
+                        "Card does not match a winning pattern",
+                        "Your card does not have a valid bingo pattern yet."
+                );
+            }
+
+            List<Winner> winners = new ArrayList<>();
+            for (GameCard winningCard : winningCards) {
+                winningCard.setWinner(true);
+                gameCardRepository.save(winningCard);
+                winners.add(winnerService.createWinner(gameId, winningCard));
+            }
+
+            BigDecimal totalPool = game.getEntryFee().multiply(BigDecimal.valueOf(gameCardRepository.findByGameId(gameId).size()));
+            winnerService.distributeRewards(gameId, totalPool, winners);
+
+            game.setStatus(GameStatus.ENDED);
+            gameRepository.save(game);
+
+            stopCalling(gameId);
+
+            Winner claimantWinner = winners.stream()
+                    .filter(winner -> playerId.equals(winner.getPlayerId()))
+                    .findFirst()
+                    .orElse(winners.get(0));
+
+            messagingTemplate.convertAndSend("/topic/game/" + gameId + "/winner", winners);
+            messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.ENDED);
+
+            return claimantWinner;
         }
-
-        if (!winnerRepository.findByGameId(gameId).isEmpty()) {
-            throw new GameProgressException(
-                    "Game already has a winner",
-                    "This game already has a winner and is no longer accepting claims."
-            );
-        }
-
-        GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
-                .stream()
-                .findFirst()
-                .orElseThrow(() -> new PlayerActionException(
-                        "Player has no card for the game",
-                        "You do not have a card in the current started game."
-                ));
-
-        Card card = cardRepository.findById(gameCard.getCardId())
-                .orElseThrow(() -> new PlayerActionException("Card not found", "Your card could not be loaded."));
-
-        List<Integer> calledNumbers = getCalledNumbers(gameId);
-        if (!isWinningCard(card, calledNumbers)) {
-            throw new PlayerActionException(
-                    "Card does not match a winning pattern",
-                    "Your card does not have a valid bingo pattern yet."
-            );
-        }
-
-        gameCard.setWinner(true);
-        gameCardRepository.save(gameCard);
-
-        Winner winner = winnerService.createWinner(gameId, gameCard);
-        BigDecimal totalPool = game.getEntryFee().multiply(BigDecimal.valueOf(gameCardRepository.findByGameId(gameId).size()));
-        winnerService.distributeRewards(gameId, totalPool, List.of(winner));
-
-        game.setStatus(GameStatus.ENDED);
-        gameRepository.save(game);
-
-        stopCalling(gameId);
-
-        // Broadcast Winner to WebSocket
-        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/winner", winner);
-        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.ENDED);
-
-        return winner;
     }
 
     public List<Winner> checkWinners(Long gameId, List<Integer> calledNumbers) {

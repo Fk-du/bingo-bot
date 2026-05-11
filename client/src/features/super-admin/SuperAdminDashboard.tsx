@@ -1,8 +1,59 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Shield, Users, BarChart3, Settings, Database, Activity } from 'lucide-react';
+import { superAdminApi } from '../../api/services';
+import type { Transaction } from '../../types';
+import { copyTextWithFallback } from '../../utils/copy';
 
 const SuperAdminDashboard: React.FC = () => {
+  const [busy, setBusy] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+
+  useEffect(() => {
+    const loadTransactions = async () => {
+      try {
+        setTransactions(await superAdminApi.getTransactions());
+      } catch (error) {
+        console.error('Failed to load super admin transactions', error);
+      }
+    };
+
+    loadTransactions();
+  }, []);
+
+  const run = async (task: () => Promise<void>) => {
+    try {
+      setBusy(true);
+      await task();
+    } catch (error: any) {
+      alert(error?.response?.data?.message || error?.message || 'Action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createAgent = async () => {
+    const botUsername = window.prompt('Bot username');
+    if (!botUsername) return;
+    await run(async () => {
+      const link = await superAdminApi.createAgent(botUsername);
+      const copied = await copyTextWithFallback(link, 'Agent invite');
+      if (copied) {
+        alert('Agent invite copied');
+      }
+    });
+  };
+
+  const fundAgent = async () => {
+    const agentId = Number(window.prompt('Agent ID'));
+    const amount = Number(window.prompt('Amount', '10'));
+    if (Number.isNaN(agentId) || Number.isNaN(amount)) return alert('Invalid agent id or amount');
+    await run(async () => {
+      await superAdminApi.fundAgent(agentId, amount);
+      alert('Agent funded');
+    });
+  };
+
   const stats = [
     { label: 'Total Agents', value: '24', icon: <Users size={16} />, color: 'text-blue-500' },
     { label: 'Total Revenue', value: '$12,450', icon: <BarChart3 size={16} />, color: 'text-green-500' },
@@ -10,10 +61,10 @@ const SuperAdminDashboard: React.FC = () => {
   ];
 
   const actions = [
-    { name: 'Create Agent', icon: <Users />, desc: 'Add new admin/agent' },
-    { name: 'Fund Agents', icon: <Database />, desc: 'Add points to agent wallets' },
-    { name: 'System Reports', icon: <BarChart3 />, desc: 'View global analytics' },
-    { name: 'Control Center', icon: <Settings />, desc: 'System configuration' },
+    { name: 'Create Agent', icon: <Users />, desc: 'Add new admin/agent', onClick: createAgent },
+    { name: 'Fund Agents', icon: <Database />, desc: 'Add points to agent wallets', onClick: fundAgent },
+    { name: 'System Reports', icon: <BarChart3 />, desc: 'View global analytics', onClick: () => alert('Reports are not wired yet') },
+    { name: 'Control Center', icon: <Settings />, desc: 'System configuration', onClick: () => alert('Settings are not wired yet') },
   ];
 
   return (
@@ -47,6 +98,7 @@ const SuperAdminDashboard: React.FC = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className="glass-card p-4 flex items-center gap-4 cursor-pointer hover:bg-blue-500/5 transition-colors border border-white/5 hover:border-blue-500/20"
+            onClick={action.onClick}
           >
             <div className="h-12 w-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-500">
               {action.icon}
@@ -62,11 +114,27 @@ const SuperAdminDashboard: React.FC = () => {
       <div className="mt-8 p-6 glass-card bg-gradient-to-br from-blue-500/10 to-transparent border-blue-500/20">
         <h4 className="text-sm font-bold mb-2">Network Health</h4>
         <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
-          <div className="h-full w-[94%] bg-blue-500" />
+          <div className={`h-full w-[94%] bg-blue-500 ${busy ? 'animate-pulse' : ''}`} />
         </div>
         <div className="flex justify-between mt-2 text-[10px] font-bold text-slate-500 uppercase">
           <span>94% System Efficiency</span>
           <span>Latency: 24ms</span>
+        </div>
+      </div>
+
+      <div className="glass-card p-4">
+        <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4">Recent Platform Activity</h3>
+        <div className="space-y-3">
+          {transactions.slice(0, 5).map((tx) => (
+            <div key={tx.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+              <div>
+                <div className="text-[11px] font-bold">User #{tx.userId}</div>
+                <div className="text-[9px] text-slate-500 uppercase">{tx.type.replace(/_/g, ' ')}</div>
+              </div>
+              <div className="text-[11px] font-bold text-blue-400">{tx.amount}</div>
+            </div>
+          ))}
+          {!transactions.length && <div className="text-sm text-slate-500">No transactions yet.</div>}
         </div>
       </div>
     </div>

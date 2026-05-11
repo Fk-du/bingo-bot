@@ -15,8 +15,8 @@ import PlayerDashboard from './features/player/PlayerDashboard';
 import WinnerAnnouncement from './features/game/WinnerAnnouncement';
 
 const App: React.FC = () => {
-  const { user, loading: authLoading, error: authError } = useAuth();
-  const { currentGame, myCards, cardDetails, loading: gameLoading, joinGame, fetchGameData } = useGame();
+  const { user, loading: authLoading, error: authError, refreshUser } = useAuth();
+  const { currentGame, myCards, cardDetails, loading: gameLoading, joinGame, fetchGameData } = useGame(user?.role);
   const { connected, lastNumber, gameStatus, winner } = useWebSocket(currentGame?.id);
   const [showSplash, setShowSplash] = useState(true);
   const [calledNumbers, setCalledNumbers] = useState<number[]>([]);
@@ -82,6 +82,8 @@ const App: React.FC = () => {
             gameStatus={gameStatus}
             gameLoading={gameLoading}
             lastNumber={lastNumber}
+            onRefresh={fetchGameData}
+            onRefreshUser={refreshUser}
             onJoin={handleJoin}
           />
         );
