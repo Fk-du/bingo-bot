@@ -9,12 +9,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/dashboard")
+@RequestMapping("/api/v1/users")
 @RequiredArgsConstructor
-public class DashboardController {
+public class UserController {
 
-    @GetMapping
-    public ResponseEntity<User> getDashboardData(@AuthenticationPrincipal User user) {
+    @GetMapping("/me")
+    public ResponseEntity<User> getCurrentUser(@AuthenticationPrincipal User user) {
         return ResponseEntity.ok(user);
     }
 }

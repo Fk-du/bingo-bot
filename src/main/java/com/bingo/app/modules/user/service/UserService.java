@@ -5,12 +5,15 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.List;
 
+import com.bingo.app.infrastructure.tenant.TenantContext;
+import com.bingo.app.infrastructure.tenant.TenantManagementService;
 import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.enums.Role;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import com.bingo.app.modules.user.repository.UserRepository;
@@ -20,6 +23,7 @@ import com.bingo.app.modules.user.repository.UserRepository;
 public class UserService implements UserDetailsService {
 
     private final UserRepository userRepository;
+    private final TenantManagementService tenantManagementService;
 
     public User createPlayer(Long telegramId, Long parentId) {
         return createUser(telegramId, Role.PLAYER, parentId, BigDecimal.ZERO);
@@ -33,13 +37,22 @@ public class UserService implements UserDetailsService {
         return createUser(telegramId, Role.ADMIN, parentId, initialBalance);
     }
 
+    @Transactional("masterTransactionManager")
     public User createInvitedUser(Long telegramId, User inviter) {
         if (inviter == null) {
             throw new IllegalStateException("Inviter not found.");
         }
 
         if (inviter.getRole() == Role.SUPER_ADMIN) {
-            return createAdmin(telegramId, inviter.getId(), BigDecimal.ZERO);
+            User admin = createAdmin(telegramId, inviter.getId(), BigDecimal.ZERO);
+            String previousTenant = TenantContext.get();
+            TenantContext.set(TenantContext.masterTenant());
+            try {
+                tenantManagementService.registerTenant(admin.getId());
+            } finally {
+                TenantContext.set(previousTenant);
+            }
+            return admin;
         }
 
         if (inviter.getRole() == Role.ADMIN) {

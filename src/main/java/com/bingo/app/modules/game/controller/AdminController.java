@@ -1,11 +1,17 @@
 package com.bingo.app.modules.game.controller;
 
-import com.bingo.app.modules.game.entity.Game;
+import com.bingo.app.modules.game.dto.CreateGameRequest;
+import com.bingo.app.modules.game.dto.GameCardResponse;
+import com.bingo.app.modules.game.dto.GameResponse;
+import com.bingo.app.modules.game.service.CardService;
 import com.bingo.app.modules.game.service.GameEngineService;
 import com.bingo.app.modules.game.service.GameService;
 import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.enums.Role;
 import com.bingo.app.modules.user.service.UserService;
+import jakarta.validation.Valid;
+import com.bingo.app.modules.topup.entity.TopUpRequest;
+import com.bingo.app.modules.topup.service.TopUpService;
 import com.bingo.app.modules.wallet.entity.Transaction;
 import com.bingo.app.modules.wallet.service.WalletService;
 import com.bingo.app.modules.invite.service.InviteService;
@@ -26,20 +32,22 @@ public class AdminController {
 
     private final GameService gameService;
     private final GameEngineService gameEngineService;
+    private final CardService cardService;
     private final UserService userService;
     private final WalletService walletService;
     private final InviteService inviteService;
+    private final TopUpService topUpService;
 
     // --- Game Management ---
 
     @PostMapping("/games/create")
-    public ResponseEntity<Game> createGame(@AuthenticationPrincipal User admin, @RequestParam BigDecimal entryFee) {
-        return ResponseEntity.ok(gameService.createGameWithEntryFee(admin.getId(), entryFee));
+    public ResponseEntity<GameResponse> createGame(@AuthenticationPrincipal User admin, @Valid @RequestBody CreateGameRequest request) {
+        return ResponseEntity.ok(gameService.createGameWithEntryFee(admin.getId(), request));
     }
 
     @PostMapping("/games/{id}/start")
-    public ResponseEntity<Game> startGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
-        Game game = gameService.startGameForAdmin(admin.getId(), id);
+    public ResponseEntity<GameResponse> startGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        GameResponse game = gameService.startGameForAdmin(admin.getId(), id);
         gameEngineService.startCalling(id);
         return ResponseEntity.ok(game);
     }
@@ -59,8 +67,8 @@ public class AdminController {
     }
 
     @PostMapping("/games/{id}/end")
-    public ResponseEntity<Game> endGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
-        Game game = gameService.endGameForAdmin(admin.getId(), id);
+    public ResponseEntity<GameResponse> endGame(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        GameResponse game = gameService.endGameForAdmin(admin.getId(), id);
         gameEngineService.stopCalling(id);
         return ResponseEntity.ok(game);
     }
@@ -68,17 +76,17 @@ public class AdminController {
     @PostMapping("/games/{id}/reject-player")
     public ResponseEntity<Void> rejectPlayer(@AuthenticationPrincipal User admin, @PathVariable Long id, @RequestParam Long playerId) {
         gameService.requireAdminGame(admin.getId(), id);
-        // gameService.rejectPlayer(id, playerId); // To be implemented
+        cardService.removePlayerFromGame(id, playerId);
         return ResponseEntity.ok().build();
     }
 
     @GetMapping("/games/status")
-    public ResponseEntity<Game> getGameStatus(@AuthenticationPrincipal User admin, @RequestParam Long gameId) {
-        return ResponseEntity.ok(gameService.requireAdminGame(admin.getId(), gameId));
+    public ResponseEntity<GameResponse> getGameStatus(@AuthenticationPrincipal User admin, @RequestParam Long gameId) {
+        return ResponseEntity.ok(GameResponse.from(gameService.requireAdminGame(admin.getId(), gameId)));
     }
 
     @GetMapping("/game/current")
-    public ResponseEntity<Game> getCurrentGame(@AuthenticationPrincipal User admin) {
+    public ResponseEntity<GameResponse> getCurrentGame(@AuthenticationPrincipal User admin) {
         return gameService.findCurrentGameForAdmin(admin.getId())
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.noContent().build());
@@ -115,10 +123,45 @@ public class AdminController {
         return ResponseEntity.ok().build();
     }
 
-    @PostMapping("/points/request")
-    public ResponseEntity<Void> requestPoints(@AuthenticationPrincipal User admin, @RequestParam BigDecimal amount) {
-        // walletService.createPointRequestFromOwner(admin.getId(), amount); // To be implemented
+    @PostMapping("/withdrawals/{id}/reject")
+    public ResponseEntity<Void> rejectWithdrawal(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        walletService.rejectWithdrawRequest(admin.getId(), id);
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/points/request")
+    public ResponseEntity<Transaction> requestPoints(@AuthenticationPrincipal User admin, @RequestParam BigDecimal amount) {
+        return ResponseEntity.ok(walletService.createAgentPointRequest(admin.getId(), amount));
+    }
+
+    // --- Top-Up Requests (to Super Admin) ---
+
+    @PostMapping("/topup/request")
+    public ResponseEntity<TopUpRequest> requestTopUp(@AuthenticationPrincipal User admin, @RequestParam BigDecimal amount, @RequestParam(required = false) String proofImageFileId) {
+        if (admin.getParentId() == null) {
+            throw new com.bingo.app.exception.PlayerActionException("No super admin", "You are not linked to any super admin.");
+        }
+        TopUpRequest request = topUpService.createRequest(admin.getId(), admin.getParentId(), amount, proofImageFileId);
+        return ResponseEntity.ok(request);
+    }
+
+    // --- Top-Up Requests (from Players) ---
+
+    @GetMapping("/topup/pending")
+    public ResponseEntity<List<TopUpRequest>> getPendingTopUps(@AuthenticationPrincipal User admin) {
+        return ResponseEntity.ok(topUpService.getPendingRequestsForApprover(admin.getId()));
+    }
+
+    @PostMapping("/topup/{id}/approve")
+    public ResponseEntity<TopUpRequest> approveTopUp(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        TopUpRequest request = topUpService.approveRequest(id, admin.getId());
+        return ResponseEntity.ok(request);
+    }
+
+    @PostMapping("/topup/{id}/reject")
+    public ResponseEntity<TopUpRequest> rejectTopUp(@AuthenticationPrincipal User admin, @PathVariable Long id) {
+        TopUpRequest request = topUpService.rejectRequest(id, admin.getId());
+        return ResponseEntity.ok(request);
     }
 
     // --- Invitation ---

@@ -33,6 +33,9 @@ public class Game {
     private LocalDateTime endTime;
 
     @Builder.Default
+    private Integer currentCallIndex = 0;
+
+    @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
 
     @PreUpdate

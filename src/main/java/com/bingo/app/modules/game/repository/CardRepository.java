@@ -1,6 +1,7 @@
 package com.bingo.app.modules.game.repository;
 
-
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Optional;
@@ -15,4 +16,6 @@ public interface CardRepository extends JpaRepository<Card, Long> {
     List<Card> findByUsedFalse();
 
     List<Card> findByUsedTrue();
+
+    Page<Card> findByUsedFalse(Pageable pageable);
 }

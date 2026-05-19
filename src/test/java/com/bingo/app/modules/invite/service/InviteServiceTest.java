@@ -22,9 +22,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.bingo.app.modules.invite.entity.InviteCode;
+import com.bingo.app.infrastructure.entity.InviteCode;
 import com.bingo.app.modules.user.entity.User;
-import com.bingo.app.modules.invite.repository.InviteCodeRepository;
+import com.bingo.app.infrastructure.repository.InviteCodeRepository;
 import com.bingo.app.modules.user.repository.UserRepository;
 import com.bingo.app.modules.user.service.UserService;
 import com.bingo.app.modules.invite.service.InviteService;

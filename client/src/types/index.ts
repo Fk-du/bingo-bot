@@ -1,5 +1,5 @@
 export type Role = 'PLAYER' | 'ADMIN' | 'SUPER_ADMIN';
-export type GameStatus = 'WAITING' | 'STARTED' | 'CLAIM_PENDING' | 'ENDED';
+export type GameStatus = 'REGISTRATION_OPEN' | 'IN_PROGRESS' | 'CLAIM_PENDING' | 'ENDED';
 
 export interface User {
   id: number;
@@ -33,8 +33,6 @@ export interface Card {
   used: boolean;
 }
 
-export type CardDetail = Card;
-
 export interface Transaction {
   id: number;
   userId: number;
@@ -56,4 +54,28 @@ export interface Winner {
 
 export interface AuthResponse {
   user: User;
+}
+
+export type TopUpStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface CardPage {
+  content: Card[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+  first: boolean;
+  last: boolean;
+  empty: boolean;
+}
+
+export interface TopUpRequest {
+  id: number;
+  requesterId: number;
+  approverId: number;
+  amount: number;
+  status: TopUpStatus;
+  proofImageFileId?: string;
+  createdAt: string;
+  updatedAt?: string;
 }

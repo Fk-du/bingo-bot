@@ -8,5 +8,7 @@ public enum TransactionType {
     AGENT_FUND,
     PLAYER_FUND,
     POINT_PURCHASE,
-    WITHDRAW_REQUEST
+    WITHDRAW_REQUEST,
+    PLATFORM_FEE,
+    AGENT_COMMISSION
 }

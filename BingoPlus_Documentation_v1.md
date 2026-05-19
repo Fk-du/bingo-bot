@@ -177,7 +177,8 @@ Each agent runs one game at a time. All number calling is server-authoritative.
 ### 6.3 Gameplay Phase
 
 - Agent starts the game and registration locks.
-- Numbers are called at a configurable interval.
+- On game start, the full number pool (1–75) is Fisher-Yates shuffled using `SecureRandom` and persisted row-by-row with a sequence index — the call order is **sealed** before the first number is drawn.
+- Numbers are called at a configurable interval by advancing through the pre-sealed sequence (O(1) per call, no repeated DB queries).
 - Each called number is broadcast to all connected participants.
 - Players tap called numbers for display purposes only; server state remains authoritative.
 - Agent can pause or resume calling at any time.
@@ -331,6 +332,8 @@ Key entities:
 - `audit_log`
 - `config`
 
+Notable additions: `called_numbers` stores a `sequence_index` (0–74) recording the pre-sealed Fisher-Yates draw order. `games` stores a `current_call_index` tracking the next number to draw, enabling O(1) advancement through the sealed sequence.
+
 The `transactions` and `audit_log` tables are append-only.
 
 ## 11. Security
@@ -344,7 +347,7 @@ The `transactions` and `audit_log` tables are append-only.
 ### 11.2 Game Integrity
 
 - Bingo cards are generated with `SecureRandom`.
-- Number sequences are generated server-side and sealed at game start.
+- The full 1–75 number pool is Fisher-Yates shuffled with `SecureRandom` at game start and persisted to `called_numbers` with a `sequence_index` — the draw order is sealed before the first call and is immutable for the life of the game.
 - Claim validation is performed only on the server.
 - Valid simultaneous claims share the winner payout equally.
 

@@ -37,6 +37,9 @@ public class User implements UserDetails {
     private BigDecimal balance = BigDecimal.ZERO;
 
     @Builder.Default
+    private BigDecimal frozenBalance = BigDecimal.ZERO;
+
+    @Builder.Default
     private boolean active = true;
 
     @Builder.Default

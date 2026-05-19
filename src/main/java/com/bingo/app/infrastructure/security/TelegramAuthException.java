@@ -1,6 +1,10 @@
 package com.bingo.app.infrastructure.security;
 
-public class TelegramAuthException extends RuntimeException {
+import org.springframework.security.core.AuthenticationException;
+
+public class TelegramAuthException extends AuthenticationException {
+
+    private static final long serialVersionUID = 1L;
 
     private final String userMessage;
 

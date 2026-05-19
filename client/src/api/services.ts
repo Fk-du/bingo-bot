@@ -1,9 +1,9 @@
 import apiClient from './client';
-import type { User, Game, GameCard, AuthResponse, Card, Transaction } from '../types';
+import type { User, Game, GameCard, Card, CardPage, Transaction, TopUpRequest } from '../types';
 
 export const authApi = {
-  login: async (initData: string): Promise<AuthResponse> => {
-    const response = await apiClient.post<AuthResponse>(
+  login: async (initData: string): Promise<User> => {
+    const response = await apiClient.post<User>(
       '/auth/login',
       {},
       { headers: { Authorization: initData } }
@@ -14,18 +14,18 @@ export const authApi = {
 
 export const userApi = {
   getDashboard: async (): Promise<User> => {
-    const response = await apiClient.get<User>('/dashboard');
+    const response = await apiClient.get<User>('/users/me');
     return response.data;
   },
 };
 
 export const gameApi = {
   getCurrentGame: async (): Promise<Game | null> => {
-    const response = await apiClient.get<Game>('/player/game/current');
+    const response = await apiClient.get<Game>('/games/active');
     return response.status === 204 ? null : response.data;
   },
-  joinGame: async (gameId: number): Promise<GameCard> => {
-    const response = await apiClient.post<GameCard>(`/player/game/${gameId}/join`);
+  joinGame: async (gameId: number, cardId: number): Promise<GameCard> => {
+    const response = await apiClient.post<GameCard>(`/games/${gameId}/register?cardId=${cardId}`);
     return response.data;
   },
   getMyCards: async (): Promise<GameCard[]> => {
@@ -34,16 +34,27 @@ export const gameApi = {
   },
 };
 
-export const adminGameApi = {
-  getCurrentGame: async (): Promise<Game | null> => {
-    const response = await apiClient.get<Game>('/admin/game/current');
-    return response.status === 204 ? null : response.data;
-  },
-};
-
 export const adminApi = {
-  createGame: async (entryFee: number): Promise<Game> => {
-    const response = await apiClient.post<Game>(`/admin/games/create?entryFee=${entryFee}`);
+  requestTopUp: async (amount: number, proofImageFileId?: string): Promise<TopUpRequest> => {
+    const params = new URLSearchParams({ amount: String(amount) });
+    if (proofImageFileId) params.append('proofImageFileId', proofImageFileId);
+    const response = await apiClient.post<TopUpRequest>('/admin/topup/request', null, { params });
+    return response.data;
+  },
+  getPendingTopUps: async (): Promise<TopUpRequest[]> => {
+    const response = await apiClient.get<TopUpRequest[]>('/admin/topup/pending');
+    return response.data;
+  },
+  approveTopUp: async (id: number): Promise<TopUpRequest> => {
+    const response = await apiClient.post<TopUpRequest>(`/admin/topup/${id}/approve`);
+    return response.data;
+  },
+  rejectTopUp: async (id: number): Promise<TopUpRequest> => {
+    const response = await apiClient.post<TopUpRequest>(`/admin/topup/${id}/reject`);
+    return response.data;
+  },
+  createGame: async (entryFee: number, maxPlayers?: number): Promise<Game> => {
+    const response = await apiClient.post<Game>('/admin/games/create', { entryFee, maxPlayers });
     return response.data;
   },
   startGame: async (id: number): Promise<void> => {
@@ -88,11 +99,21 @@ export const cardApi = {
     const response = await apiClient.get<Card>(`/cards/${id}`);
     return response.data;
   },
+  listAvailable: async (page: number = 0, size: number = 20): Promise<CardPage> => {
+    const response = await apiClient.get<CardPage>(`/cards/available?page=${page}&size=${size}`);
+    return response.data;
+  },
 };
 
 export const playerApi = {
+  requestTopUp: async (amount: number, proofImageFileId?: string): Promise<TopUpRequest> => {
+    const params = new URLSearchParams({ amount: String(amount) });
+    if (proofImageFileId) params.append('proofImageFileId', proofImageFileId);
+    const response = await apiClient.post<TopUpRequest>('/player/topup/request', null, { params });
+    return response.data;
+  },
   claimBingo: async (gameId: number): Promise<void> => {
-    await apiClient.post(`/player/game/${gameId}/bingo/claim`);
+    await apiClient.post(`/games/${gameId}/claim`);
   },
   getInviteLink: async (botUsername: string): Promise<string> => {
     const response = await apiClient.get<string>(`/player/invite-link?botUsername=${encodeURIComponent(botUsername)}`);
@@ -113,6 +134,18 @@ export const playerApi = {
 };
 
 export const superAdminApi = {
+  getPendingTopUps: async (): Promise<TopUpRequest[]> => {
+    const response = await apiClient.get<TopUpRequest[]>('/super-admin/topup/pending');
+    return response.data;
+  },
+  approveTopUp: async (id: number): Promise<TopUpRequest> => {
+    const response = await apiClient.post<TopUpRequest>(`/super-admin/topup/${id}/approve`);
+    return response.data;
+  },
+  rejectTopUp: async (id: number): Promise<TopUpRequest> => {
+    const response = await apiClient.post<TopUpRequest>(`/super-admin/topup/${id}/reject`);
+    return response.data;
+  },
   createAgent: async (botUsername: string): Promise<string> => {
     const response = await apiClient.post<string>(`/super-admin/agents/create?botUsername=${encodeURIComponent(botUsername)}`);
     return response.data;
@@ -127,5 +160,27 @@ export const superAdminApi = {
   getTransactions: async (): Promise<Transaction[]> => {
     const response = await apiClient.get<Transaction[]>('/super-admin/transactions');
     return response.data;
+  },
+  getReports: async (): Promise<Record<string, number>> => {
+    const response = await apiClient.get<Record<string, number>>('/super-admin/reports');
+    return response.data;
+  },
+  getGames: async (): Promise<Game[]> => {
+    const response = await apiClient.get<Game[]>('/super-admin/games/active');
+    return response.data;
+  },
+  getWithdrawals: async (): Promise<Transaction[]> => {
+    const response = await apiClient.get<Transaction[]>('/super-admin/withdrawals');
+    return response.data;
+  },
+  payWithdrawal: async (id: number): Promise<void> => {
+    await apiClient.post(`/super-admin/withdrawals/${id}/pay`);
+  },
+  getSettings: async (): Promise<Record<string, string>> => {
+    const response = await apiClient.get<Record<string, string>>('/super-admin/settings');
+    return response.data;
+  },
+  updateSettings: async (settings: Record<string, string>): Promise<void> => {
+    await apiClient.put('/super-admin/settings', settings);
   },
 };

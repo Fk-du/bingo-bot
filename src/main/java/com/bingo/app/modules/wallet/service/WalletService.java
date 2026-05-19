@@ -10,6 +10,7 @@ import com.bingo.app.modules.wallet.enums.TransactionStatus;
 import com.bingo.app.modules.wallet.enums.TransactionType;
 import com.bingo.app.exception.PlayerActionException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import com.bingo.app.modules.wallet.entity.Transaction;
@@ -25,6 +26,7 @@ public class WalletService {
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
 
+    @Transactional("tenantTransactionManager")
     public void transferPoints(Long fromUserId, Long toUserId, BigDecimal amount) {
         User fromUser = userRepository.findById(fromUserId).orElseThrow();
         User toUser = userRepository.findById(toUserId).orElseThrow();
@@ -70,6 +72,24 @@ public class WalletService {
         transactionRepository.save(tx);
     }
 
+    @Transactional("tenantTransactionManager")
+    public void creditSystem(Long userId, BigDecimal amount, TransactionType type) {
+        User user = userRepository.findById(userId).orElseThrow();
+        user.setBalance(user.getBalance().add(amount));
+        userRepository.save(user);
+
+        Transaction tx = Transaction.builder()
+                .userId(userId)
+                .type(type)
+                .amount(amount)
+                .status(TransactionStatus.APPROVED)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        transactionRepository.save(tx);
+    }
+
+    @Transactional("tenantTransactionManager")
     public void creditWin(Long userId, BigDecimal amount) {
 
         User user = userRepository.findById(userId).orElseThrow();
@@ -94,6 +114,7 @@ public class WalletService {
                 .getBalance();
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction fundAgent(Long superAdminId, Long agentId, BigDecimal amount) {
         User agent = userRepository.findById(agentId)
                 .orElseThrow(() -> new IllegalStateException("Agent not found"));
@@ -108,6 +129,7 @@ public class WalletService {
         return creditAndRecord(agent.getId(), amount, TransactionType.AGENT_FUND, superAdminId, null);
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction fundPlayer(Long adminId, Long playerId, BigDecimal amount) {
         User player = userRepository.findById(playerId)
                 .orElseThrow(() -> new IllegalStateException("Player not found"));
@@ -119,13 +141,28 @@ public class WalletService {
             );
         }
 
+        User admin = userRepository.findById(adminId)
+                .orElseThrow(() -> new IllegalStateException("Admin not found"));
+
+        if (admin.getBalance().compareTo(amount) < 0) {
+            throw new PlayerActionException(
+                    "Insufficient balance",
+                    "You do not have enough coins to fund this player."
+            );
+        }
+
+        admin.setBalance(admin.getBalance().subtract(amount));
+        userRepository.save(admin);
+
         return creditAndRecord(player.getId(), amount, TransactionType.PLAYER_FUND, adminId, null);
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction buyPoints(Long playerId, BigDecimal amount, String proofImageFileId) {
         return creditAndRecord(playerId, amount, TransactionType.POINT_PURCHASE, null, proofImageFileId);
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction createWithdrawRequest(Long playerId, BigDecimal amount, String proofImageFileId) {
         if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new PlayerActionException("Invalid withdraw amount", "Withdraw amount must be greater than zero.");
@@ -137,6 +174,10 @@ public class WalletService {
         if (player.getBalance().compareTo(amount) < 0) {
             throw new PlayerActionException("Insufficient balance", "You do not have enough balance for this withdraw request.");
         }
+
+        player.setBalance(player.getBalance().subtract(amount));
+        player.setFrozenBalance(player.getFrozenBalance().add(amount));
+        userRepository.save(player);
 
         Transaction tx = Transaction.builder()
                 .userId(playerId)
@@ -150,6 +191,7 @@ public class WalletService {
         return transactionRepository.save(tx);
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction chargeGameEntry(Long playerId, BigDecimal entryFee) {
         if (entryFee == null || entryFee.compareTo(BigDecimal.ZERO) < 0) {
             throw new PlayerActionException("Invalid entry fee", "Entry fee must be zero or greater.");
@@ -194,6 +236,7 @@ public class WalletService {
         return approved;
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction approveWithdrawRequest(Long adminId, Long requestId) {
         Transaction tx = transactionRepository.findById(requestId)
                 .orElseThrow(() -> new PlayerActionException("Request not found", "Withdraw request could not be found."));
@@ -207,6 +250,7 @@ public class WalletService {
         return approveWithdraw(tx, adminId);
     }
 
+    @Transactional("tenantTransactionManager")
     public Transaction rejectWithdrawRequest(Long adminId, Long requestId) {
         Transaction tx = transactionRepository.findById(requestId)
                 .orElseThrow(() -> new PlayerActionException("Request not found", "Withdraw request could not be found."));
@@ -216,6 +260,13 @@ public class WalletService {
         if (tx.getStatus() != TransactionStatus.PENDING) {
             throw new PlayerActionException("Already processed", "This withdraw request is already processed.");
         }
+
+        User player = userRepository.findById(tx.getUserId())
+                .orElseThrow(() -> new PlayerActionException("Player not found", "Player account could not be found."));
+
+        player.setFrozenBalance(player.getFrozenBalance().subtract(tx.getAmount()));
+        player.setBalance(player.getBalance().add(tx.getAmount()));
+        userRepository.save(player);
 
         tx.setStatus(TransactionStatus.REJECTED);
         tx.setApprovedBy(adminId);
@@ -238,6 +289,56 @@ public class WalletService {
 
     public List<Transaction> getAllTransactions() {
         return transactionRepository.findAll();
+    }
+
+    @Transactional("tenantTransactionManager")
+    public Transaction createAgentPointRequest(Long adminId, BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new PlayerActionException("Invalid amount", "Amount must be greater than zero.");
+        }
+
+        Transaction tx = Transaction.builder()
+                .userId(adminId)
+                .type(TransactionType.POINT_PURCHASE)
+                .amount(amount)
+                .status(TransactionStatus.PENDING)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        return transactionRepository.save(tx);
+    }
+
+    @Transactional("tenantTransactionManager")
+    public Transaction approveWithdrawRequestBySuperAdmin(Long superAdminId, Long requestId) {
+        Transaction tx = transactionRepository.findById(requestId)
+                .orElseThrow(() -> new PlayerActionException("Request not found", "Withdraw request could not be found."));
+
+        if (tx.getType() != TransactionType.WITHDRAW_REQUEST) {
+            throw new PlayerActionException("Invalid request type", "Only withdraw requests can be reviewed here.");
+        }
+
+        if (tx.getStatus() != TransactionStatus.PENDING) {
+            throw new PlayerActionException("Already processed", "This withdraw request is already processed.");
+        }
+
+        User player = userRepository.findById(tx.getUserId())
+                .orElseThrow(() -> new PlayerActionException("Player not found", "Player for this request was not found."));
+
+        if (player.getRole() != Role.PLAYER) {
+            throw new PlayerActionException("Invalid request", "Only player withdrawal requests can be processed.");
+        }
+
+        User admin = userRepository.findById(player.getParentId())
+                .orElseThrow(() -> new PlayerActionException("Admin not found", "Player's admin could not be found."));
+
+        if (!superAdminId.equals(admin.getParentId())) {
+            throw new PlayerActionException(
+                    "Access denied",
+                    "You can only process withdrawals for players under your agent hierarchy."
+            );
+        }
+
+        return approveWithdraw(tx, superAdminId);
     }
 
     public List<Transaction> getPendingWithdrawsForAdminPlayers(Long adminId) {
@@ -279,13 +380,13 @@ public class WalletService {
 
     private Transaction approveWithdraw(Transaction tx, Long approvedBy) {
         User player = userRepository.findById(tx.getUserId()).orElseThrow();
-        if (player.getBalance().compareTo(tx.getAmount()) < 0) {
+        if (player.getFrozenBalance().compareTo(tx.getAmount()) < 0) {
             tx.setStatus(TransactionStatus.REJECTED);
             tx.setApprovedBy(approvedBy);
             return transactionRepository.save(tx);
         }
 
-        player.setBalance(player.getBalance().subtract(tx.getAmount()));
+        player.setFrozenBalance(player.getFrozenBalance().subtract(tx.getAmount()));
         userRepository.save(player);
 
         tx.setStatus(TransactionStatus.APPROVED);

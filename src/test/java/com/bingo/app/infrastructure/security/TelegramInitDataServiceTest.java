@@ -54,9 +54,11 @@ class TelegramInitDataServiceTest {
 
         long authDate = Instant.now().minusSeconds(3600).getEpochSecond();
         String userJson = "{\"id\":12345,\"first_name\":\"Test\"}";
+        String userJsonEncoded = urlEncode(userJson);
+        // Telegram docs: data-check string uses decoded values (like PHP $_GET / Node URLSearchParams)
         String dataCheckString = "auth_date=" + authDate + "\nuser=" + userJson;
         String hash = hmacHex(dataCheckString, "test-bot-token");
-        String initData = "auth_date=" + authDate + "&user=" + urlEncode(userJson) + "&hash=" + hash;
+        String initData = "auth_date=" + authDate + "&user=" + userJsonEncoded + "&hash=" + hash;
 
         User resolved = assertDoesNotThrow(() -> telegramInitDataService.resolveUser(initData));
 

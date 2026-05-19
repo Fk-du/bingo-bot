@@ -4,10 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -15,8 +13,11 @@ import java.util.List;
 import java.util.Optional;
 
 import com.bingo.app.exception.PlayerActionException;
+import com.bingo.app.modules.game.dto.CardResponse;
+import com.bingo.app.modules.game.dto.GameCardResponse;
 import com.bingo.app.modules.game.enums.GameStatus;
 import com.bingo.app.modules.user.enums.Role;
+import com.bingo.app.modules.wallet.service.WalletService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,7 +34,6 @@ import com.bingo.app.modules.game.repository.GameCardRepository;
 import com.bingo.app.modules.game.repository.GameRepository;
 import com.bingo.app.modules.user.entity.User;
 import com.bingo.app.modules.user.repository.UserRepository;
-import com.bingo.app.modules.game.service.CardService;
 
 @ExtendWith(MockitoExtension.class)
 class CardServiceTest {
@@ -50,6 +50,9 @@ class CardServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private WalletService walletService;
+
     @InjectMocks
     private CardService cardService;
 
@@ -63,7 +66,7 @@ class CardServiceTest {
         Game game = Game.builder()
                 .id(10L)
                 .adminId(100L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .build();
 
         User player = User.builder()
@@ -87,7 +90,7 @@ class CardServiceTest {
 
         PlayerActionException ex = assertThrows(
                 PlayerActionException.class,
-                () -> cardService.assignCard(10L, 5L)
+                () -> cardService.assignCard(10L, 5L, 30L)
         );
 
         assertEquals("You already have a card in the current game.", ex.getUserMessage());
@@ -98,7 +101,7 @@ class CardServiceTest {
         Game game = Game.builder()
                 .id(10L)
                 .adminId(100L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .build();
 
         User player = User.builder()
@@ -113,18 +116,19 @@ class CardServiceTest {
 
         PlayerActionException ex = assertThrows(
                 PlayerActionException.class,
-                () -> cardService.assignCard(10L, 5L)
+                () -> cardService.assignCard(10L, 5L, 30L)
         );
 
         assertEquals("You can only join games created by your assigned agent.", ex.getUserMessage());
     }
 
     @Test
-    void assignCardCreatesCardOnDemandWhenNoUnusedCardExists() {
+    void assignCardWithSpecificCardId() {
         Game game = Game.builder()
                 .id(10L)
                 .adminId(100L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
+                .entryFee(java.math.BigDecimal.ZERO)
                 .build();
 
         User player = User.builder()
@@ -134,9 +138,9 @@ class CardServiceTest {
                 .parentId(100L)
                 .build();
 
-        Card newCard = Card.builder()
+        Card availableCard = Card.builder()
                 .id(40L)
-                .numbers("1,2,3")
+                .numbers("1,16,31,46,61,2,17,32,47,62,3,18,FREE,48,63,4,19,34,49,64,5,20,35,50,65")
                 .used(false)
                 .build();
 
@@ -151,21 +155,53 @@ class CardServiceTest {
         when(gameRepository.findById(10L)).thenReturn(Optional.of(game));
         when(userRepository.findById(5L)).thenReturn(Optional.of(player));
         when(gameCardRepository.findByGameIdAndPlayerId(10L, 5L)).thenReturn(List.of());
-        when(cardRepository.findFirstByUsedFalse()).thenReturn(Optional.empty());
-        when(cardRepository.save(any(Card.class))).thenReturn(newCard);
+        when(cardRepository.findById(40L)).thenReturn(Optional.of(availableCard));
+        when(cardRepository.save(any(Card.class))).thenReturn(availableCard);
         when(gameCardRepository.save(any(GameCard.class))).thenReturn(savedGameCard);
 
-        GameCard actual = cardService.assignCard(10L, 5L);
+        GameCardResponse actual = cardService.assignCard(10L, 5L, 40L);
 
-        assertEquals(savedGameCard, actual);
+        assertEquals(50L, actual.id());
+        assertEquals(10L, actual.gameId());
+        assertEquals(5L, actual.playerId());
+        assertEquals(40L, actual.cardId());
+        assertFalse(actual.winner());
+        assertTrue(availableCard.isUsed());
+    }
 
-        ArgumentCaptor<Card> captor = ArgumentCaptor.forClass(Card.class);
-        verify(cardRepository, times(2)).save(captor.capture());
-        String generatedNumbers = captor.getAllValues().get(0).getNumbers();
-        assertNotNull(generatedNumbers);
-        assertValidBingoCard(generatedNumbers);
-        assertFalse(captor.getAllValues().get(0).isUsed());
-        assertEquals(40L, captor.getAllValues().get(1).getId());
+    @Test
+    void assignCardRejectsAlreadyUsedCard() {
+        Game game = Game.builder()
+                .id(10L)
+                .adminId(100L)
+                .status(GameStatus.REGISTRATION_OPEN)
+                .entryFee(java.math.BigDecimal.ZERO)
+                .build();
+
+        User player = User.builder()
+                .id(5L)
+                .telegramId(123L)
+                .role(Role.PLAYER)
+                .parentId(100L)
+                .build();
+
+        Card usedCard = Card.builder()
+                .id(40L)
+                .numbers("1,2,3")
+                .used(true)
+                .build();
+
+        when(gameRepository.findById(10L)).thenReturn(Optional.of(game));
+        when(userRepository.findById(5L)).thenReturn(Optional.of(player));
+        when(gameCardRepository.findByGameIdAndPlayerId(10L, 5L)).thenReturn(List.of());
+        when(cardRepository.findById(40L)).thenReturn(Optional.of(usedCard));
+
+        PlayerActionException ex = assertThrows(
+                PlayerActionException.class,
+                () -> cardService.assignCard(10L, 5L, 40L)
+        );
+
+        assertEquals("This card has already been taken by another player. Please select a different card.", ex.getUserMessage());
     }
 
     @Test
@@ -180,10 +216,14 @@ class CardServiceTest {
 
         when(gameCardRepository.findByPlayerId(5L)).thenReturn(List.of(existing));
 
-        List<GameCard> actual = cardService.findCardsForPlayer(5L);
+        List<GameCardResponse> actual = cardService.findCardsForPlayer(5L);
 
         assertEquals(1, actual.size());
-        assertSame(existing, actual.get(0));
+        assertEquals(70L, actual.get(0).id());
+        assertEquals(12L, actual.get(0).gameId());
+        assertEquals(5L, actual.get(0).playerId());
+        assertEquals(80L, actual.get(0).cardId());
+        assertFalse(actual.get(0).winner());
     }
 
     @Test
@@ -201,27 +241,20 @@ class CardServiceTest {
         assertTrue(actual.contains("\n  1  16  31  46  61"));
     }
 
-    private void assertValidBingoCard(String rawNumbers) {
-        List<String> tokens = java.util.Arrays.stream(rawNumbers.split(","))
-                .map(String::trim)
-                .toList();
+    @Test
+    void findCardByIdReturnsCardResponse() {
+        Card card = Card.builder()
+                .id(90L)
+                .numbers("1,16,31,46,61,2,17,32,47,62,3,18,FREE,48,63,4,19,34,49,64,5,20,35,50,65")
+                .used(true)
+                .build();
 
-        assertEquals(25, tokens.size());
-        assertEquals(CardService.FREE_CENTER, tokens.get(12));
+        when(cardRepository.findById(90L)).thenReturn(Optional.of(card));
 
-        for (int row = 0; row < 5; row++) {
-            assertInRange(tokens.get((row * 5)), 1, 15);
-            assertInRange(tokens.get((row * 5) + 1), 16, 30);
-            if (row != 2) {
-                assertInRange(tokens.get((row * 5) + 2), 31, 45);
-            }
-            assertInRange(tokens.get((row * 5) + 3), 46, 60);
-            assertInRange(tokens.get((row * 5) + 4), 61, 75);
-        }
-    }
+        CardResponse actual = cardService.findCardById(90L);
 
-    private void assertInRange(String value, int min, int max) {
-        int number = Integer.parseInt(value);
-        org.junit.jupiter.api.Assertions.assertTrue(number >= min && number <= max);
+        assertEquals(90L, actual.id());
+        assertTrue(actual.used());
+        assertNotNull(actual.numbers());
     }
 }

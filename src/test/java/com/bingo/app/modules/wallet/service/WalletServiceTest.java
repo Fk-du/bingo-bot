@@ -66,6 +66,13 @@ class WalletServiceTest {
 
     @Test
     void fundAgentCreditsDirectChildAndRecordsTransaction() {
+        User superAdmin = User.builder()
+                .id(1L)
+                .telegramId(100L)
+                .role(Role.SUPER_ADMIN)
+                .balance(new BigDecimal("1000.00"))
+                .build();
+
         User agent = User.builder()
                 .id(2L)
                 .telegramId(200L)
@@ -82,5 +89,6 @@ class WalletServiceTest {
         assertEquals(TransactionType.AGENT_FUND, tx.getType());
         assertEquals(TransactionStatus.APPROVED, tx.getStatus());
         assertEquals(new BigDecimal("25.00"), tx.getAmount());
+        assertEquals(new BigDecimal("1000.00"), superAdmin.getBalance());
     }
 }

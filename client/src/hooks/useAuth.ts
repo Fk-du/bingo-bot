@@ -26,7 +26,7 @@ export const useAuth = () => {
         throw new Error('Telegram initData is unavailable');
       }
 
-      const { user: userData } = await authApi.login(initData);
+      const userData = await authApi.login(initData);
       setUser(userData);
       setError(null);
     } catch (err: any) {

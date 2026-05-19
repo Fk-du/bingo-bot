@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useAuth } from './hooks/useAuth';
 import { useGame } from './hooks/useGame';
 import { useWebSocket } from './hooks/useWebSocket';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './components/Toast';
 
-// Layouts & Components
 import MainLayout from './layouts/MainLayout';
-// Features
 import SplashScreen from './features/auth/SplashScreen';
 import ErrorScreen from './features/auth/ErrorScreen';
 import SuperAdminDashboard from './features/super-admin/SuperAdminDashboard';
@@ -20,6 +20,7 @@ const App: React.FC = () => {
   const { connected, lastNumber, gameStatus, winner } = useWebSocket(currentGame?.id);
   const [showSplash, setShowSplash] = useState(true);
   const [calledNumbers, setCalledNumbers] = useState<number[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2000);
@@ -33,12 +34,16 @@ const App: React.FC = () => {
   }, [lastNumber]);
 
   useEffect(() => {
-    if (gameStatus === 'WAITING' || gameStatus === 'STARTED') {
+    if (gameStatus === 'REGISTRATION_OPEN' || gameStatus === 'IN_PROGRESS') {
       setCalledNumbers([]);
     }
     if (gameStatus) {
-      fetchGameData();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => fetchGameData(), 300);
     }
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [gameStatus]);
 
   const activeGameCard = useMemo(() => {
@@ -46,13 +51,9 @@ const App: React.FC = () => {
     return myCards.find(c => c.gameId === currentGame.id);
   }, [myCards, currentGame]);
 
-  const handleJoin = async () => {
+  const handleJoinWithCard = async (cardId: number) => {
     if (currentGame) {
-      try {
-        await joinGame(currentGame.id);
-      } catch (e: any) {
-        alert(e.response?.data?.message || 'Failed to join game');
-      }
+      await joinGame(currentGame.id, cardId);
     }
   };
 
@@ -84,32 +85,34 @@ const App: React.FC = () => {
             lastNumber={lastNumber}
             onRefresh={fetchGameData}
             onRefreshUser={refreshUser}
-            onJoin={handleJoin}
+            onJoinWithCard={handleJoinWithCard}
           />
         );
     }
   };
 
   return (
-    <>
-      <AnimatePresence mode="wait">
-        {(showSplash || authLoading) && <SplashScreen key="splash" />}
-      </AnimatePresence>
+    <ErrorBoundary>
+      <ToastProvider>
+        <AnimatePresence mode="wait">
+          {(showSplash || authLoading) && <SplashScreen key="splash" />}
+        </AnimatePresence>
 
-      {!authLoading && !showSplash && (
-        <MainLayout connected={connected}>
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="w-full max-w-md mx-auto"
-          >
-            {renderDashboard()}
-            <WinnerAnnouncement winner={winner} />
-          </motion.div>
-        </MainLayout>
-      )}
-    </>
+        {!authLoading && !showSplash && (
+          <MainLayout connected={connected}>
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="w-full max-w-md mx-auto"
+            >
+              {renderDashboard()}
+              <WinnerAnnouncement winner={winner} onNewGame={fetchGameData} />
+            </motion.div>
+          </MainLayout>
+        )}
+      </ToastProvider>
+    </ErrorBoundary>
   );
 };
 

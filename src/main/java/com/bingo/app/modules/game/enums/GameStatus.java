@@ -1,8 +1,8 @@
 package com.bingo.app.modules.game.enums;
 
 public enum GameStatus {
-    WAITING,
-    STARTED,
+    REGISTRATION_OPEN,
+    IN_PROGRESS,
     CLAIM_PENDING,
     ENDED
 }

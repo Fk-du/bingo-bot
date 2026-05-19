@@ -13,14 +13,12 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 
 @Component
@@ -43,6 +41,29 @@ public class TelegramInitDataService {
 
     @Value("${bingo.telegram.auth.max-age-seconds:86400}")
     private long maxAgeSeconds;
+
+    @PostConstruct
+    public void verifyToken() {
+        if (botToken == null || botToken.isBlank()) {
+            log.error("BOT TOKEN IS NULL OR EMPTY! Authentication will always fail.");
+        } else {
+            String trimmed = botToken.trim();
+            if (!trimmed.equals(botToken)) {
+                log.warn("Bot token has leading/trailing whitespace! Trimming. original_length={}, trimmed_length={}", botToken.length(), trimmed.length());
+            }
+            if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+                log.warn("Bot token is wrapped in double quotes! Removing. token={}", trimmed);
+            }
+            int colonIndex = trimmed.indexOf(':');
+            if (colonIndex <= 0 || colonIndex >= trimmed.length() - 1) {
+                log.warn("Bot token does not contain ':' separator. token_start={}", trimmed.substring(0, Math.min(10, trimmed.length())));
+            }
+            String masked = trimmed.length() > 8
+                    ? trimmed.substring(0, 4) + "****" + trimmed.substring(trimmed.length() - 4)
+                    : "****";
+            log.info("Bot token loaded. Length={}, masked={}", trimmed.length(), masked);
+        }
+    }
 
     public Long resolveTelegramId(String authorizationHeader) {
         TelegramUserPayload payload = validateAndParse(authorizationHeader);
@@ -69,6 +90,9 @@ public class TelegramInitDataService {
 
     private TelegramUserPayload validateAndParse(String rawHeader) {
         String initData = normalizeAuthorizationHeader(rawHeader);
+
+        log.debug("RAW initData header (first 300 chars): {}", initData.substring(0, Math.min(initData.length(), 300)));
+
         Map<String, String> fields = parseQueryString(initData);
 
         String receivedHash = fields.get("hash");
@@ -97,13 +121,20 @@ public class TelegramInitDataService {
 
         String dataCheckString = fields.entrySet().stream()
                 .filter(entry -> !"hash".equals(entry.getKey()))
-                .filter(entry -> !"signature".equals(entry.getKey()))
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("\n"));
 
+        log.debug("initData fields (decoded): {}", fields);
+        log.debug("dataCheckString (decoded): {}", dataCheckString);
+        log.debug("receivedHash: {}", receivedHash);
+
         String expectedHash = calculateHash(dataCheckString);
         if (!expectedHash.equalsIgnoreCase(receivedHash)) {
+            log.warn("Hash mismatch with decoded values (including signature field).");
+            log.warn("  Expected: {}", expectedHash);
+            log.warn("  Received: {}", receivedHash);
+
             throw new TelegramAuthException(
                     "Telegram initData hash mismatch",
                     "Telegram authentication failed. Please reload the Mini App."

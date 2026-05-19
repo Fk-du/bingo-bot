@@ -1,8 +1,7 @@
 package com.bingo.app.modules.game.controller;
 
-import com.bingo.app.modules.game.entity.Game;
-import com.bingo.app.modules.game.entity.GameCard;
-import com.bingo.app.modules.invite.service.InviteService;
+import com.bingo.app.modules.game.dto.GameCardResponse;
+import com.bingo.app.modules.game.dto.GameResponse;
 import com.bingo.app.modules.game.service.GameService;
 import com.bingo.app.modules.game.service.CardService;
 import com.bingo.app.modules.user.entity.User;
@@ -12,10 +11,14 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import com.bingo.app.modules.game.service.GameEngineService;
+import com.bingo.app.modules.invite.service.InviteService;
+import com.bingo.app.modules.topup.entity.TopUpRequest;
+import com.bingo.app.modules.topup.service.TopUpService;
 import com.bingo.app.modules.wallet.entity.Transaction;
 import com.bingo.app.modules.wallet.service.WalletService;
 import org.springframework.security.access.prepost.PreAuthorize;
 
+import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 import java.util.List;
 
@@ -30,9 +33,10 @@ public class PlayerController {
     private final GameEngineService gameEngineService;
     private final WalletService walletService;
     private final InviteService inviteService;
+    private final TopUpService topUpService;
 
     @GetMapping("/game/current")
-    public ResponseEntity<Game> getCurrentGame(@AuthenticationPrincipal User user) {
+    public ResponseEntity<GameResponse> getCurrentGame(@AuthenticationPrincipal User user) {
         if (user.getParentId() == null) {
             return ResponseEntity.noContent().build();
         }
@@ -43,21 +47,17 @@ public class PlayerController {
     }
 
     @PostMapping("/game/{gameId}/register")
-    public ResponseEntity<Void> registerForGame(@PathVariable Long gameId, @AuthenticationPrincipal User user) {
-        // Logic to register before game starts
-        return ResponseEntity.ok().build();
+    public ResponseEntity<GameCardResponse> registerForGame(
+            @PathVariable Long gameId,
+            @RequestParam Long cardId,
+            @AuthenticationPrincipal User user) {
+        return ResponseEntity.ok(cardService.assignCard(gameId, user.getId(), cardId));
     }
 
     @GetMapping("/game/{gameId}/available-cards")
-    public ResponseEntity<List<Object>> getAvailableCards(@PathVariable Long gameId) {
-        // return ResponseEntity.ok(cardService.getUnassignedCards(gameId));
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/game/{gameId}/join")
-    public ResponseEntity<GameCard> joinGame(@PathVariable Long gameId, @AuthenticationPrincipal User user) {
-        GameCard gameCard = cardService.assignCard(gameId, user.getId());
-        return ResponseEntity.ok(gameCard);
+    public ResponseEntity<Integer> getAvailableCards(@PathVariable Long gameId) {
+        int count = cardService.countCardsForGame(gameId);
+        return ResponseEntity.ok(count);
     }
 
     @PostMapping("/game/{gameId}/bingo/claim")
@@ -67,7 +67,7 @@ public class PlayerController {
     }
 
     @GetMapping("/my-cards")
-    public ResponseEntity<List<GameCard>> getMyCards(@AuthenticationPrincipal User user) {
+    public ResponseEntity<List<GameCardResponse>> getMyCards(@AuthenticationPrincipal User user) {
         return ResponseEntity.ok(cardService.findCardsForPlayer(user.getId()));
     }
 
@@ -82,17 +82,26 @@ public class PlayerController {
     }
 
     @PostMapping("/points/buy")
-    public ResponseEntity<Transaction> buyPoints(@AuthenticationPrincipal User user, @RequestParam BigDecimal amount) {
+    public ResponseEntity<Transaction> buyPoints(@AuthenticationPrincipal User user, @RequestParam @Positive BigDecimal amount) {
         return ResponseEntity.ok(walletService.buyPoints(user.getId(), amount, null));
     }
 
     @PostMapping("/withdraw")
-    public ResponseEntity<Transaction> withdrawRequest(@AuthenticationPrincipal User user, @RequestParam BigDecimal amount) {
+    public ResponseEntity<Transaction> withdrawRequest(@AuthenticationPrincipal User user, @RequestParam @Positive BigDecimal amount) {
         return ResponseEntity.ok(walletService.createWithdrawRequest(user.getId(), amount, null));
     }
 
     @GetMapping("/invite-link")
     public ResponseEntity<String> getInviteLink(@AuthenticationPrincipal User user, @RequestParam String botUsername) {
         return ResponseEntity.ok(inviteService.generateInviteLinkForUser(user.getId(), botUsername));
+    }
+
+    @PostMapping("/topup/request")
+    public ResponseEntity<TopUpRequest> requestTopUp(@AuthenticationPrincipal User user, @RequestParam BigDecimal amount, @RequestParam(required = false) String proofImageFileId) {
+        if (user.getParentId() == null) {
+            throw new com.bingo.app.exception.PlayerActionException("No admin", "You are not linked to any admin.");
+        }
+        TopUpRequest request = topUpService.createRequest(user.getId(), user.getParentId(), amount, proofImageFileId);
+        return ResponseEntity.ok(request);
     }
 }

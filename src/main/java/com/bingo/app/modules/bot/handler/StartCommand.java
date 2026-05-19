@@ -1,5 +1,8 @@
 package com.bingo.app.modules.bot.handler;
 
+import com.bingo.app.infrastructure.tenant.TenantContext;
+import com.bingo.app.infrastructure.tenant.TenantHelper;
+import com.bingo.app.modules.user.entity.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,16 +34,19 @@ public class StartCommand {
         log.info("StartCommand invoked for telegramId={}", telegramId);
 
         if (telegramId.equals(superAdminId)) {
-            var superAdmin = userService.ensureSuperAdmin(telegramId);
-            send(bot, update, "Super admin access confirmed.");
-            menuService.showMenu(bot, update, superAdmin);
+            User superAdmin = userService.ensureSuperAdmin(telegramId);
+            TenantHelper.runWithTenant(superAdmin, () -> {
+                send(bot, update, "Super admin access confirmed.");
+                menuService.showMenu(bot, update, superAdmin);
+            });
             return;
         }
 
         var userOpt = userService.findByTelegramId(telegramId);
 
         if (userOpt.isPresent()) {
-            menuService.showMenu(bot, update, userOpt.get());
+            User existing = userOpt.get();
+            TenantHelper.runWithTenant(existing, () -> menuService.showMenu(bot, update, existing));
             return;
         }
 
@@ -50,9 +56,11 @@ public class StartCommand {
         }
 
         try {
-            var user = inviteService.registerWithInvite(telegramId, code);
-            send(bot, update, "Registration completed successfully.");
-            menuService.showMenu(bot, update, user);
+            User user = inviteService.registerWithInvite(telegramId, code);
+            TenantHelper.runWithTenant(user, () -> {
+                send(bot, update, "Registration completed successfully.");
+                menuService.showMenu(bot, update, user);
+            });
         } catch (InviteRegistrationException ex) {
             log.warn("Invite registration failed for telegramId={}: {}", telegramId, ex.getMessage());
             send(bot, update, ex.getUserMessage());

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { adminGameApi, cardApi, gameApi } from '../api/services';
+import { cardApi, gameApi } from '../api/services';
 import type { Game, GameCard, Card, Role } from '../types';
 
 export const useGame = (role?: Role | null) => {
@@ -29,7 +29,7 @@ export const useGame = (role?: Role | null) => {
       }
 
       if (role === 'ADMIN') {
-        const game = await adminGameApi.getCurrentGame();
+        const game = await gameApi.getCurrentGame();
         setCurrentGame(game);
         setMyCards([]);
         setCardDetails({});
@@ -46,10 +46,10 @@ export const useGame = (role?: Role | null) => {
     }
   };
 
-  const joinGame = async (gameId: number) => {
+  const joinGame = async (gameId: number, cardId: number) => {
     try {
       setLoading(true);
-      const newGameCard = await gameApi.joinGame(gameId);
+      const newGameCard = await gameApi.joinGame(gameId, cardId);
       setMyCards(prev => [...prev, newGameCard]);
       
       const detail = await cardApi.getCard(newGameCard.cardId);

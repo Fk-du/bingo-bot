@@ -2,14 +2,18 @@ package com.bingo.app.modules.game.service;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
+import com.bingo.app.modules.game.dto.CreateGameRequest;
+import com.bingo.app.modules.game.dto.GameResponse;
 import com.bingo.app.modules.game.enums.GameStatus;
 import com.bingo.app.exception.GameCreationException;
 import com.bingo.app.exception.GameProgressException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,38 +27,35 @@ public class GameService {
     private final GameRepository gameRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    @Value("${app.game.default-entry-fee:0}")
+    @Value("${app.game.default-entry-fee:10}")
     private BigDecimal defaultEntryFee;
 
     @Value("${app.game.default-max-players:50}")
     private int defaultMaxPlayers;
 
-    public Game createGame(Long adminId, BigDecimal entryFee, int maxPlayers) {
+    private Game createGame(Long adminId, BigDecimal entryFee, Integer maxPlayers) {
         Game game = Game.builder()
                 .adminId(adminId)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .entryFee(entryFee)
-                .maxPlayers(maxPlayers)
+                .maxPlayers(maxPlayers != null ? maxPlayers : defaultMaxPlayers)
                 .createdAt(LocalDateTime.now())
                 .build();
 
         return gameRepository.save(game);
     }
 
-    public Game createDefaultGame(Long adminId) {
-        return createGameWithEntryFee(adminId, defaultEntryFee);
-    }
-
-    public Game createGameWithEntryFee(Long adminId, BigDecimal entryFee) {
-        if (entryFee == null || entryFee.compareTo(BigDecimal.ZERO) < 0) {
+    @Transactional("tenantTransactionManager")
+    public GameResponse createGameWithEntryFee(Long adminId, CreateGameRequest request) {
+        if (request.entryFee() == null || request.entryFee().compareTo(BigDecimal.ZERO) < 0) {
             throw new GameCreationException(
                     "Invalid entry fee",
                     "Entry fee must be zero or greater."
             );
         }
 
-        boolean hasWaitingGame = !gameRepository.findByAdminIdAndStatus(adminId, GameStatus.WAITING).isEmpty();
-        boolean hasStartedGame = !gameRepository.findByAdminIdAndStatus(adminId, GameStatus.STARTED).isEmpty();
+        boolean hasWaitingGame = !gameRepository.findByAdminIdAndStatus(adminId, GameStatus.REGISTRATION_OPEN).isEmpty();
+        boolean hasStartedGame = !gameRepository.findByAdminIdAndStatus(adminId, GameStatus.IN_PROGRESS).isEmpty();
 
         if (hasWaitingGame || hasStartedGame) {
             throw new GameCreationException(
@@ -63,32 +64,40 @@ public class GameService {
             );
         }
 
-        return createGame(adminId, entryFee, defaultMaxPlayers);
+        return GameResponse.from(createGame(adminId, request.entryFee(), request.maxPlayers()));
     }
 
-    public Optional<Game> findCurrentWaitingGame() {
-        return gameRepository.findFirstByStatusOrderByCreatedAtAsc(GameStatus.WAITING);
+    public List<Game> findAllGames() {
+        return gameRepository.findAll();
     }
 
-    public Optional<Game> findCurrentStartedGame() {
-        return gameRepository.findFirstByStatusOrderByStartTimeAsc(GameStatus.STARTED);
+    public Optional<GameResponse> findCurrentWaitingGame() {
+        return gameRepository.findFirstByStatusOrderByCreatedAtAsc(GameStatus.REGISTRATION_OPEN)
+                .map(GameResponse::from);
     }
 
-    public Optional<Game> findCurrentGame() {
-        Optional<Game> startedGame = findCurrentStartedGame();
+    public Optional<GameResponse> findCurrentStartedGame() {
+        return gameRepository.findFirstByStatusOrderByStartTimeAsc(GameStatus.IN_PROGRESS)
+                .map(GameResponse::from);
+    }
+
+    public Optional<GameResponse> findCurrentGame() {
+        Optional<GameResponse> startedGame = findCurrentStartedGame();
         return startedGame.isPresent() ? startedGame : findCurrentWaitingGame();
     }
 
-    public Optional<Game> findAdminWaitingGame(Long adminId) {
-        return gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(adminId, GameStatus.WAITING);
+    public Optional<GameResponse> findAdminWaitingGame(Long adminId) {
+        return gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(adminId, GameStatus.REGISTRATION_OPEN)
+                .map(GameResponse::from);
     }
 
-    public Optional<Game> findAdminStartedGame(Long adminId) {
-        return gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(adminId, GameStatus.STARTED);
+    public Optional<GameResponse> findAdminStartedGame(Long adminId) {
+        return gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(adminId, GameStatus.IN_PROGRESS)
+                .map(GameResponse::from);
     }
 
-    public Optional<Game> findCurrentGameForAdmin(Long adminId) {
-        Optional<Game> startedGame = findAdminStartedGame(adminId);
+    public Optional<GameResponse> findCurrentGameForAdmin(Long adminId) {
+        Optional<GameResponse> startedGame = findAdminStartedGame(adminId);
         return startedGame.isPresent() ? startedGame : findAdminWaitingGame(adminId);
     }
 
@@ -106,45 +115,25 @@ public class GameService {
         return game;
     }
 
-    public Game startCurrentGameForAdmin(Long adminId) {
-        Game startedGame = findAdminStartedGame(adminId).orElse(null);
-        if (startedGame != null) {
-            throw new GameProgressException(
-                    "Admin already has a started game",
-                    "You already have a started game. Call the next number or end that game first."
-            );
-        }
-
-        Game waitingGame = findAdminWaitingGame(adminId).orElseThrow(() -> new GameProgressException(
-                "No waiting game found for admin",
-                "You do not have a waiting game to start."
-        ));
-
-        waitingGame.setStatus(GameStatus.STARTED);
-        waitingGame.setStartTime(LocalDateTime.now());
-
-        Game saved = gameRepository.save(waitingGame);
-        messagingTemplate.convertAndSend("/topic/game/" + saved.getId() + "/status", GameStatus.STARTED);
-        return saved;
-    }
-
-    public Game startGameForAdmin(Long adminId, Long gameId) {
+    @Transactional("tenantTransactionManager")
+    public GameResponse startGameForAdmin(Long adminId, Long gameId) {
         Game game = requireAdminGame(adminId, gameId);
-        if (game.getStatus() == GameStatus.STARTED) {
+        if (game.getStatus() == GameStatus.IN_PROGRESS) {
             throw new GameProgressException(
                     "Game already started",
                     "This game is already started."
             );
         }
 
-        game.setStatus(GameStatus.STARTED);
+        game.setStatus(GameStatus.IN_PROGRESS);
         game.setStartTime(LocalDateTime.now());
         Game saved = gameRepository.save(game);
-        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.STARTED);
-        return saved;
+        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.IN_PROGRESS);
+        return GameResponse.from(saved);
     }
 
-    public Game endGameForAdmin(Long adminId, Long gameId) {
+    @Transactional("tenantTransactionManager")
+    public GameResponse endGameForAdmin(Long adminId, Long gameId) {
         Game game = requireAdminGame(adminId, gameId);
         if (game.getStatus() == GameStatus.ENDED) {
             throw new GameProgressException(
@@ -156,20 +145,22 @@ public class GameService {
         game.setStatus(GameStatus.ENDED);
         Game saved = gameRepository.save(game);
         messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.ENDED);
-        return saved;
+        return GameResponse.from(saved);
     }
 
+    @Transactional("tenantTransactionManager")
     public void startGame(Long gameId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow();
 
-        game.setStatus(GameStatus.STARTED);
+        game.setStatus(GameStatus.IN_PROGRESS);
         game.setStartTime(LocalDateTime.now());
 
         gameRepository.save(game);
-        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.STARTED);
+        messagingTemplate.convertAndSend("/topic/game/" + gameId + "/status", GameStatus.IN_PROGRESS);
     }
 
+    @Transactional("tenantTransactionManager")
     public void endGame(Long gameId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow();

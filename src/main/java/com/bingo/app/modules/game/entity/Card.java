@@ -16,11 +16,12 @@ public class Card {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Store bingo numbers as JSON string or use converter later
     @Column(columnDefinition = "TEXT")
     private String numbers;
 
     @Builder.Default
     private boolean used = false;
-    
+
+    @Version
+    private Long version;
 }

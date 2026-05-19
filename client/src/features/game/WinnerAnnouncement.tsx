@@ -5,9 +5,10 @@ import type { Winner } from '../../types';
 
 interface WinnerProps {
   winner: Winner | Winner[] | null;
+  onNewGame?: () => void;
 }
 
-const WinnerAnnouncement: React.FC<WinnerProps> = ({ winner }) => {
+const WinnerAnnouncement: React.FC<WinnerProps> = ({ winner, onNewGame }) => {
   if (!winner) return null;
 
   const winners = Array.isArray(winner) ? winner : [winner];
@@ -30,7 +31,7 @@ const WinnerAnnouncement: React.FC<WinnerProps> = ({ winner }) => {
           <p className="text-xs text-white">{winnerLabel}</p>
        </div>
        <button 
-        onClick={() => window.location.reload()}
+        onClick={onNewGame || (() => window.location.reload())}
         className="ml-auto text-xs font-bold underline text-white"
        >
          New Game

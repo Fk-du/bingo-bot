@@ -18,10 +18,14 @@ public class CalledNumber {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Column(nullable = false)
     private Long gameId;
 
+    @Column(nullable = false)
     private Integer number;
 
-    @Builder.Default
-    private LocalDateTime calledAt = LocalDateTime.now();
+    @Column(nullable = false)
+    private Integer sequenceIndex;
+
+    private LocalDateTime calledAt;
 }

@@ -3,13 +3,17 @@ package com.bingo.app.modules.game.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
+import com.bingo.app.modules.game.dto.CreateGameRequest;
+import com.bingo.app.modules.game.dto.GameResponse;
 import com.bingo.app.modules.game.enums.GameStatus;
 import com.bingo.app.exception.GameCreationException;
 import com.bingo.app.exception.GameProgressException;
@@ -24,7 +28,6 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.bingo.app.modules.game.entity.Game;
 import com.bingo.app.modules.game.repository.GameRepository;
-import com.bingo.app.modules.game.service.GameService;
 
 @ExtendWith(MockitoExtension.class)
 class GameServiceTest {
@@ -45,46 +48,48 @@ class GameServiceTest {
     }
 
     @Test
-    void createDefaultGameRejectsWhenAdminAlreadyHasWaitingGame() {
+    void createGameWithEntryFeeRejectsWhenAdminAlreadyHasWaitingGame() {
         Game waitingGame = Game.builder()
                 .id(10L)
                 .adminId(5L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .entryFee(BigDecimal.ZERO)
                 .maxPlayers(50)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.WAITING)).thenReturn(List.of(waitingGame));
-        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.STARTED)).thenReturn(List.of());
+        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.REGISTRATION_OPEN)).thenReturn(List.of(waitingGame));
+        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.IN_PROGRESS)).thenReturn(List.of());
 
         GameCreationException ex = assertThrows(
                 GameCreationException.class,
-                () -> gameService.createDefaultGame(5L)
+                () -> gameService.createGameWithEntryFee(5L, new CreateGameRequest(BigDecimal.ZERO, 50))
         );
 
         assertEquals("You already have an active game. Finish it before creating another one.", ex.getUserMessage());
     }
 
     @Test
-    void createDefaultGameCreatesWaitingGameWithDefaults() {
+    void createGameWithEntryFeeCreatesWaitingGame() {
         Game savedGame = Game.builder()
                 .id(11L)
                 .adminId(5L)
-                .status(GameStatus.WAITING)
-                .entryFee(BigDecimal.ZERO)
-                .maxPlayers(50)
+                .status(GameStatus.REGISTRATION_OPEN)
+                .entryFee(BigDecimal.valueOf(20))
+                .maxPlayers(30)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.WAITING)).thenReturn(List.of());
-        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.STARTED)).thenReturn(List.of());
-        when(gameRepository.save(org.mockito.ArgumentMatchers.any(Game.class))).thenReturn(savedGame);
+        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.REGISTRATION_OPEN)).thenReturn(List.of());
+        when(gameRepository.findByAdminIdAndStatus(5L, GameStatus.IN_PROGRESS)).thenReturn(List.of());
+        when(gameRepository.save(any(Game.class))).thenReturn(savedGame);
 
-        Game actual = gameService.createDefaultGame(5L);
+        GameResponse actual = gameService.createGameWithEntryFee(5L, new CreateGameRequest(BigDecimal.valueOf(20), 30));
 
-        assertEquals(savedGame, actual);
-        verify(gameRepository).save(org.mockito.ArgumentMatchers.any(Game.class));
+        assertEquals(11L, actual.id());
+        assertEquals(GameStatus.REGISTRATION_OPEN, actual.status());
+        assertEquals(BigDecimal.valueOf(20), actual.entryFee());
+        verify(gameRepository).save(any(Game.class));
     }
 
     @Test
@@ -92,57 +97,61 @@ class GameServiceTest {
         Game waitingGame = Game.builder()
                 .id(12L)
                 .adminId(7L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .entryFee(BigDecimal.ZERO)
                 .maxPlayers(50)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findFirstByStatusOrderByCreatedAtAsc(GameStatus.WAITING))
-                .thenReturn(java.util.Optional.of(waitingGame));
+        when(gameRepository.findFirstByStatusOrderByCreatedAtAsc(GameStatus.REGISTRATION_OPEN))
+                .thenReturn(Optional.of(waitingGame));
 
-        java.util.Optional<Game> actual = gameService.findCurrentWaitingGame();
+        Optional<GameResponse> actual = gameService.findCurrentWaitingGame();
 
         assertTrue(actual.isPresent());
-        assertEquals(waitingGame, actual.get());
+        assertEquals(12L, actual.get().id());
+        assertEquals(GameStatus.REGISTRATION_OPEN, actual.get().status());
     }
 
     @Test
-    void startCurrentGameForAdminPromotesWaitingGameToStarted() {
+    void startGameForAdminPromotesWaitingGameToStarted() {
         Game waitingGame = Game.builder()
                 .id(13L)
                 .adminId(5L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .entryFee(BigDecimal.ZERO)
                 .maxPlayers(50)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.STARTED))
-                .thenReturn(java.util.Optional.empty());
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.WAITING))
-                .thenReturn(java.util.Optional.of(waitingGame));
-        when(gameRepository.save(org.mockito.ArgumentMatchers.any(Game.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gameRepository.findById(13L)).thenReturn(Optional.of(waitingGame));
+        when(gameRepository.save(any(Game.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        Game actual = gameService.startCurrentGameForAdmin(5L);
+        GameResponse actual = gameService.startGameForAdmin(5L, 13L);
 
-        assertEquals(GameStatus.STARTED, actual.getStatus());
-        verify(gameRepository).save(org.mockito.ArgumentMatchers.any(Game.class));
+        assertEquals(GameStatus.IN_PROGRESS, actual.status());
+        verify(gameRepository).save(any(Game.class));
     }
 
     @Test
-    void startCurrentGameForAdminRejectsMissingWaitingGame() {
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.STARTED))
-                .thenReturn(java.util.Optional.empty());
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.WAITING))
-                .thenReturn(java.util.Optional.empty());
+    void startGameForAdminRejectsNonOwnedGame() {
+        Game otherAdminsGame = Game.builder()
+                .id(13L)
+                .adminId(99L)
+                .status(GameStatus.REGISTRATION_OPEN)
+                .entryFee(BigDecimal.ZERO)
+                .maxPlayers(50)
+                .createdAt(LocalDateTime.now())
+                .build();
+
+        when(gameRepository.findById(13L)).thenReturn(Optional.of(otherAdminsGame));
 
         GameProgressException ex = assertThrows(
                 GameProgressException.class,
-                () -> gameService.startCurrentGameForAdmin(5L)
+                () -> gameService.startGameForAdmin(5L, 13L)
         );
 
-        assertEquals("You do not have a waiting game to start.", ex.getUserMessage());
+        assertEquals("You can only manage games created under your account.", ex.getUserMessage());
     }
 
     @Test
@@ -150,20 +159,21 @@ class GameServiceTest {
         Game startedGame = Game.builder()
                 .id(14L)
                 .adminId(5L)
-                .status(GameStatus.STARTED)
+                .status(GameStatus.IN_PROGRESS)
                 .entryFee(BigDecimal.ZERO)
                 .maxPlayers(50)
                 .startTime(LocalDateTime.now())
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findFirstByStatusOrderByStartTimeAsc(GameStatus.STARTED))
-                .thenReturn(java.util.Optional.of(startedGame));
+        when(gameRepository.findFirstByStatusOrderByStartTimeAsc(GameStatus.IN_PROGRESS))
+                .thenReturn(Optional.of(startedGame));
 
-        java.util.Optional<Game> actual = gameService.findCurrentGame();
+        Optional<GameResponse> actual = gameService.findCurrentGame();
 
         assertTrue(actual.isPresent());
-        assertEquals(startedGame, actual.get());
+        assertEquals(14L, actual.get().id());
+        assertEquals(GameStatus.IN_PROGRESS, actual.get().status());
     }
 
     @Test
@@ -171,20 +181,21 @@ class GameServiceTest {
         Game waitingGame = Game.builder()
                 .id(15L)
                 .adminId(5L)
-                .status(GameStatus.WAITING)
+                .status(GameStatus.REGISTRATION_OPEN)
                 .entryFee(BigDecimal.ZERO)
                 .maxPlayers(50)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.STARTED))
-                .thenReturn(java.util.Optional.empty());
-        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.WAITING))
-                .thenReturn(java.util.Optional.of(waitingGame));
+        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.IN_PROGRESS))
+                .thenReturn(Optional.empty());
+        when(gameRepository.findFirstByAdminIdAndStatusOrderByCreatedAtAsc(5L, GameStatus.REGISTRATION_OPEN))
+                .thenReturn(Optional.of(waitingGame));
 
-        java.util.Optional<Game> actual = gameService.findCurrentGameForAdmin(5L);
+        Optional<GameResponse> actual = gameService.findCurrentGameForAdmin(5L);
 
         assertTrue(actual.isPresent());
-        assertEquals(waitingGame, actual.get());
+        assertEquals(15L, actual.get().id());
+        assertEquals(GameStatus.REGISTRATION_OPEN, actual.get().status());
     }
 }

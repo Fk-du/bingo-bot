@@ -12,9 +12,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
-import com.bingo.app.modules.invite.entity.InviteCode;
+import com.bingo.app.infrastructure.entity.InviteCode;
 import com.bingo.app.modules.user.entity.User;
-import com.bingo.app.modules.invite.repository.InviteCodeRepository;
+import com.bingo.app.infrastructure.repository.InviteCodeRepository;
 import com.bingo.app.modules.user.repository.UserRepository;
 
 @Service
@@ -25,7 +25,7 @@ public class InviteService {
     private final UserRepository userRepository;
     private final UserService userService;
 
-    @Transactional
+    @Transactional("masterTransactionManager")
     public User registerWithInvite(Long telegramId, String code) {
         userService.findByTelegramId(telegramId).ifPresent(user -> {
             throw InviteRegistrationException.alreadyRegistered();
@@ -52,6 +52,7 @@ public class InviteService {
         return createdUser;
     }
 
+    @Transactional("masterTransactionManager")
     public String generateInviteLinkForUser(Long inviterUserId, String botUsername) {
         User inviter = userRepository.findById(inviterUserId)
                 .orElseThrow(InviteRegistrationException::inviterNotFound);

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { RefreshCw, Pause, Plus, Users, Power, Wallet, Link as LinkIcon, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Pause, Plus, Users, Power, Wallet, Link as LinkIcon, AlertTriangle, ArrowUpFromLine, Check, X } from 'lucide-react';
 import { adminApi } from '../../api/services';
-import type { Game, Transaction } from '../../types';
+import type { Game, Transaction, TopUpRequest } from '../../types';
+import { useToast } from '../../components/Toast';
 import { copyTextWithFallback } from '../../utils/copy';
 
 interface AdminDashboardProps {
@@ -14,6 +15,8 @@ interface AdminDashboardProps {
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected, onRefresh }) => {
   const [busy, setBusy] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [pendingTopUps, setPendingTopUps] = useState<TopUpRequest[]>([]);
+  const { toast } = useToast();
 
   const refreshTransactions = async () => {
     try {
@@ -34,7 +37,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
       await onRefresh();
       await refreshTransactions();
     } catch (error: any) {
-      alert(error?.response?.data?.message || error?.message || 'Action failed');
+      toast('error', error?.response?.data?.message || error?.message || 'Action failed');
     } finally {
       setBusy(false);
     }
@@ -44,7 +47,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
     const raw = window.prompt('Entry fee', String(currentGame?.entryFee ?? 10));
     if (raw == null) return;
     const entryFee = Number(raw);
-    if (Number.isNaN(entryFee)) return alert('Invalid entry fee');
+    if (Number.isNaN(entryFee)) return toast('error', 'Invalid entry fee');
 
     await run(async () => {
       await adminApi.createGame(entryFee);
@@ -54,12 +57,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
   const startPauseOrResume = async () => {
     if (!currentGame) return;
     await run(async () => {
-      if (currentGame.status === 'WAITING') {
+      if (currentGame.status === 'REGISTRATION_OPEN') {
         await adminApi.startGame(currentGame.id);
-      } else if (currentGame.status === 'STARTED') {
+      } else if (currentGame.status === 'IN_PROGRESS') {
         await adminApi.pauseGame(currentGame.id);
-      } else {
-        await adminApi.createGame(currentGame.entryFee);
+      } else if (currentGame.status === 'CLAIM_PENDING') {
+        await adminApi.resumeGame(currentGame.id);
       }
     });
   };
@@ -75,9 +78,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
     try {
       setBusy(true);
       const players = await adminApi.getPlayers();
-      alert(players.length ? players.map((player) => `#${player.id} ${player.telegramId}`).join('\n') : 'No players yet');
+      toast('info', players.length ? `${players.length} players found` : 'No players yet');
     } catch (error: any) {
-      alert(error?.response?.data?.message || error?.message || 'Failed to load players');
+      toast('error', error?.response?.data?.message || error?.message || 'Failed to load players');
     } finally {
       setBusy(false);
     }
@@ -91,20 +94,50 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
       const link = await adminApi.getInviteLink(botUsername);
       const copied = await copyTextWithFallback(link, 'Invite link');
       if (copied) {
-        alert('Invite link copied');
+        toast('success', 'Invite link copied');
       }
     });
   };
 
-  const fundPlayer = async () => {
-    const playerId = Number(window.prompt('Player ID'));
-    const amount = Number(window.prompt('Amount', '10'));
-    if (Number.isNaN(playerId) || Number.isNaN(amount)) {
-      return alert('Invalid player id or amount');
+  const requestCoinsFromSuperAdmin = async () => {
+    const amount = Number(window.prompt('Coin amount', '100'));
+    if (Number.isNaN(amount)) return toast('error', 'Invalid amount');
+
+    const addScreenshot = window.confirm('Attach a payment screenshot?');
+    let proofImageFileId: string | undefined;
+    if (addScreenshot) {
+      proofImageFileId = window.prompt('Telegram file ID of payment screenshot') || undefined;
     }
 
     await run(async () => {
-      await adminApi.fundPlayer(playerId, amount);
+      await adminApi.requestTopUp(amount, proofImageFileId);
+      toast('success', 'Coin request submitted to super admin.');
+    });
+  };
+
+  const refreshPendingTopUps = async () => {
+    try {
+      setPendingTopUps(await adminApi.getPendingTopUps());
+    } catch (error) {
+      console.error('Failed to load pending top-ups', error);
+    }
+  };
+
+  useEffect(() => {
+    refreshPendingTopUps();
+  }, []);
+
+  const approveTopUp = async (id: number) => {
+    await run(async () => {
+      await adminApi.approveTopUp(id);
+      await refreshPendingTopUps();
+    });
+  };
+
+  const rejectTopUp = async (id: number) => {
+    await run(async () => {
+      await adminApi.rejectTopUp(id);
+      await refreshPendingTopUps();
     });
   };
 
@@ -113,7 +146,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
       setBusy(true);
       const withdrawals = await adminApi.getWithdrawals();
       if (!withdrawals.length) {
-        alert('No pending withdrawals');
+        toast('info', 'No pending withdrawals');
         return;
       }
 
@@ -124,8 +157,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
 
       await adminApi.approveWithdrawal(selected);
       await onRefresh();
+      toast('success', 'Withdrawal approved');
     } catch (error: any) {
-      alert(error?.response?.data?.message || error?.message || 'Failed to review withdrawals');
+      toast('error', error?.response?.data?.message || error?.message || 'Failed to review withdrawals');
     } finally {
       setBusy(false);
     }
@@ -133,7 +167,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
 
   const adminActions = [
     { name: 'My Players', icon: <Users size={18} />, color: 'bg-purple-500/10 text-purple-500', onClick: showPlayers },
-    { name: 'Fund Wallet', icon: <Wallet size={18} />, color: 'bg-green-500/10 text-green-500', onClick: fundPlayer },
+    { name: 'Request Coins', icon: <Wallet size={18} />, color: 'bg-green-500/10 text-green-500', onClick: requestCoinsFromSuperAdmin },
     { name: 'Invite Link', icon: <LinkIcon size={18} />, color: 'bg-blue-500/10 text-blue-500', onClick: inviteLink },
     { name: 'Withdrawals', icon: <AlertTriangle size={18} />, color: 'bg-yellow-500/10 text-yellow-500', onClick: showWithdrawals },
   ];
@@ -183,7 +217,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
               <button onClick={startPauseOrResume} disabled={busy} className="flex-1 py-4 glass-card border-purple-500/20 flex items-center justify-center gap-2">
                 <Pause size={18} fill="currentColor" />
                 <span className="font-bold text-sm uppercase">
-                  {currentGame.status === 'WAITING' ? 'Start' : currentGame.status === 'STARTED' ? 'Pause' : 'Create'}
+                  {currentGame.status === 'REGISTRATION_OPEN' ? 'Start' : currentGame.status === 'IN_PROGRESS' ? 'Pause' : currentGame.status === 'CLAIM_PENDING' ? 'Resume' : '—'}
                 </span>
               </button>
               <button onClick={endGame} disabled={busy} className="flex-1 py-4 bg-red-500/10 text-red-500 border border-red-500/20 rounded-2xl flex items-center justify-center gap-2">
@@ -212,6 +246,34 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentGame, connected,
           </motion.div>
         ))}
       </div>
+
+      {/* Pending Player Top-Ups */}
+      {pendingTopUps.length > 0 && (
+        <div className="glass-card p-4 border-yellow-500/20">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-[10px] font-bold text-yellow-500 uppercase tracking-widest">Pending Coin Requests ({pendingTopUps.length})</h3>
+            <ArrowUpFromLine size={14} className="text-yellow-500" />
+          </div>
+          <div className="space-y-3">
+            {pendingTopUps.map((req) => (
+              <div key={req.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                <div>
+                  <div className="text-sm font-bold">Player #{req.requesterId}</div>
+                  <div className="text-[10px] text-slate-500">Amount: <span className="text-yellow-400 font-bold">{req.amount}</span></div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => approveTopUp(req.id)} disabled={busy} className="h-8 w-8 rounded-lg bg-green-500/20 text-green-500 flex items-center justify-center">
+                    <Check size={14} />
+                  </button>
+                  <button onClick={() => rejectTopUp(req.id)} disabled={busy} className="h-8 w-8 rounded-lg bg-red-500/20 text-red-500 flex items-center justify-center">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Stats Table Placeholder */}
       <div className="glass-card p-4">

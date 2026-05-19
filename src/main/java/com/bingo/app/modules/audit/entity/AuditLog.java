@@ -1,4 +1,4 @@
-package com.bingo.app.modules.invite.entity;
+package com.bingo.app.modules.audit.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
@@ -6,24 +6,26 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "invite_codes")
+@Table(name = "audit_logs")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class InviteCode {
+public class AuditLog {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String code;
+    private Long userId;
 
-    private Long adminId;
+    private String action;
 
-    @Builder.Default
-    private boolean active = true;
+    @Column(columnDefinition = "TEXT")
+    private String details;
+
+    private String ipAddress;
 
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
