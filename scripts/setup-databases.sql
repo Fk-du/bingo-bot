@@ -19,7 +19,11 @@ CREATE DATABASE bingo_master
 CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     telegram_id BIGINT UNIQUE NOT NULL,
+    username VARCHAR(100),
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
     role VARCHAR(20) NOT NULL DEFAULT 'PLAYER',
+    agent_id BIGINT,
     parent_id BIGINT REFERENCES users(id),
     balance DECIMAL(19,2) NOT NULL DEFAULT 0,
     frozen_balance DECIMAL(19,2) NOT NULL DEFAULT 0,
@@ -30,8 +34,8 @@ CREATE TABLE IF NOT EXISTS users (
 -- Tenant registry
 CREATE TABLE IF NOT EXISTS tenant_registry (
     id BIGSERIAL PRIMARY KEY,
-    admin_id BIGINT UNIQUE NOT NULL,
-    database_name VARCHAR(100) NOT NULL,
+    agent_id BIGINT UNIQUE NOT NULL,
+    database_name VARCHAR(255) UNIQUE NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
@@ -39,16 +43,34 @@ CREATE TABLE IF NOT EXISTS tenant_registry (
 CREATE TABLE IF NOT EXISTS invite_codes (
     id BIGSERIAL PRIMARY KEY,
     code VARCHAR(50) UNIQUE NOT NULL,
-    admin_id BIGINT NOT NULL,
+    creator_id BIGINT NOT NULL,
+    role VARCHAR(20) NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- Agent fund requests (admin requests funds from super admin)
+CREATE TABLE IF NOT EXISTS agent_fund_requests (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL,
+    amount DECIMAL(19,2) NOT NULL,
+    screenshot_url VARCHAR(500),
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    approved_by BIGINT,
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
 -- Indexes
-CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
-CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-CREATE INDEX IF NOT EXISTS idx_tenant_registry_admin_id ON tenant_registry(admin_id);
+CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_users_agent ON users(agent_id);
+CREATE INDEX IF NOT EXISTS idx_users_parent ON users(parent_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_registry_agent ON tenant_registry(agent_id);
 CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
+CREATE INDEX IF NOT EXISTS idx_invite_codes_creator ON invite_codes(creator_id);
+CREATE INDEX IF NOT EXISTS idx_agent_fund_agent ON agent_fund_requests(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_fund_status ON agent_fund_requests(status);
 
 -- 3. Tenant databases are auto-created by the application
 -- when new admins are registered. Each database is named
