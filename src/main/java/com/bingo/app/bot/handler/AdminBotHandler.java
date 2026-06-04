@@ -9,6 +9,9 @@ import com.bingo.app.bot.callback.CallbackContext;
 import com.bingo.app.bot.service.InputStateService;
 import com.bingo.app.bot.BingoTelegramBot;
 import com.bingo.app.bot.BotConstants;
+import com.bingo.app.tenant.entity.BingoClaim;
+import com.bingo.app.tenant.enums.GameStatus;
+import com.bingo.app.tenant.repository.BingoClaimRepository;
 import com.bingo.app.tenant.service.CardService;
 import com.bingo.app.tenant.service.GameEngineService;
 import com.bingo.app.tenant.service.GameService;
@@ -17,8 +20,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Component
@@ -33,20 +39,32 @@ public class AdminBotHandler {
     private final WalletService walletService;
     private final InviteService inviteService;
     private final InputStateService inputStateService;
+    private final BingoClaimRepository bingoClaimRepository;
 
     public void handle(CallbackContext ctx) {
         String data = ctx.getData();
         log.info("AdminBotHandler handling: {}", data);
 
+        // Check for claim-specific actions with embedded claim ID
+        if (data.startsWith("APPROVE_CLAIM:")) {
+            handleApproveClaim(ctx, data.substring("APPROVE_CLAIM:".length()));
+            return;
+        }
+        if (data.startsWith("REJECT_CLAIM:")) {
+            handleRejectClaim(ctx, data.substring("REJECT_CLAIM:".length()));
+            return;
+        }
+
         switch (data) {
             case BotConstants.CREATE_GAME -> handleCreateGamePrompt(ctx);
             case BotConstants.START_GAME -> handleStartGame(ctx);
-            case BotConstants.CALL_NUMBER -> handleCallNumber(ctx);
+            case BotConstants.CANCEL_GAME -> handleCancelGame(ctx);
             case BotConstants.INVITE_LINK -> handleInviteLink(ctx);
             case BotConstants.MY_PLAYERS -> handleMyPlayers(ctx);
             case BotConstants.FUND_PLAYER -> handleFundPlayerPrompt(ctx);
             case BotConstants.WITHDRAW_REQUESTS -> handleWithdrawRequests(ctx);
             case BotConstants.ADMIN_STATS -> handleAdminStats(ctx);
+            case BotConstants.PENDING_CLAIMS -> handlePendingClaims(ctx);
             default -> sendMessage(ctx.getBot(), ctx.getChatId(), "Unknown action.");
         }
     }
@@ -113,24 +131,110 @@ public class AdminBotHandler {
         }
     }
 
-    private void handleCallNumber(CallbackContext ctx) {
-        var waitingGame = gameService.findAdminWaitingGame(ctx.getUser().getId());
-        var startedGame = gameService.findAdminStartedGame(ctx.getUser().getId());
-        var gameOpt = startedGame.isPresent() ? startedGame : waitingGame;
-
-        if (gameOpt.isEmpty()) {
-            sendMessage(ctx.getBot(), ctx.getChatId(), "No active game found.");
-            return;
-        }
-
+    private void handleCancelGame(CallbackContext ctx) {
         try {
-            Integer number = gameEngineService.callNumber(gameOpt.get().getId());
-            if (number != null) {
-                sendMarkdown(ctx.getBot(), ctx.getChatId(),
-                        "🔢 *Number Called: " + number + "*\n\nGame ID: `" + gameOpt.get().getId() + "`");
+            var waitingGame = gameService.findAdminWaitingGame(ctx.getUser().getId());
+            if (waitingGame.isEmpty()) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No waiting game to cancel.");
+                return;
+            }
+            gameService.cancelGame(waitingGame.get().getId(), ctx.getUser().getId());
+            sendMarkdown(ctx.getBot(), ctx.getChatId(),
+                    "❌ *Game Cancelled*\n\nGame ID: `" + waitingGame.get().getId() + "`");
+        } catch (Exception e) {
+            sendMessage(ctx.getBot(), ctx.getChatId(), "Failed to cancel game: " + e.getMessage());
+        }
+    }
+
+    private void handlePendingClaims(CallbackContext ctx) {
+        try {
+            var gameOpt = gameService.findCurrentGameForAdmin(ctx.getUser().getId());
+            if (gameOpt.isEmpty()) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No active game.");
+                return;
+            }
+
+            var game = gameOpt.get();
+            if (game.getStatus() != GameStatus.CLAIM_PENDING) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No pending claims for this game.");
+                return;
+            }
+
+            List<BingoClaim> pendingClaims = bingoClaimRepository
+                    .findByGameIdAndResult(game.getId(), "VALID");
+
+            if (pendingClaims.isEmpty()) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No VALID claims waiting for review.");
+                return;
+            }
+
+            for (BingoClaim claim : pendingClaims) {
+                String msg = "🔔 *Pending Bingo Claim*\n\n" +
+                        "Claim ID: `" + claim.getId() + "`\n" +
+                        "Player ID: `" + claim.getPlayerId() + "`\n" +
+                        "Claimed at: `" + claim.getClaimedAt() + "`";
+
+                InlineKeyboardMarkup keyboard = new InlineKeyboardMarkup();
+
+                InlineKeyboardButton approveBtn = new InlineKeyboardButton();
+                approveBtn.setText("✅ Approve");
+                approveBtn.setCallbackData("APPROVE_CLAIM:" + claim.getId());
+
+                InlineKeyboardButton rejectBtn = new InlineKeyboardButton();
+                rejectBtn.setText("❌ Reject");
+                rejectBtn.setCallbackData("REJECT_CLAIM:" + claim.getId());
+
+                keyboard.setKeyboard(List.of(List.of(approveBtn, rejectBtn)));
+
+                var message = SendMessage.builder()
+                        .chatId(ctx.getChatId().toString())
+                        .text(msg)
+                        .parseMode("Markdown")
+                        .replyMarkup(keyboard)
+                        .build();
+                ctx.getBot().execute(message);
             }
         } catch (Exception e) {
-            sendMessage(ctx.getBot(), ctx.getChatId(), "Failed to call number: " + e.getMessage());
+            log.error("Failed to show pending claims", e);
+            sendMessage(ctx.getBot(), ctx.getChatId(), "Failed to load pending claims: " + e.getMessage());
+        }
+    }
+
+    private void handleApproveClaim(CallbackContext ctx, String claimIdStr) {
+        try {
+            Long claimId = Long.parseLong(claimIdStr);
+            var gameOpt = gameService.findCurrentGameForAdmin(ctx.getUser().getId());
+            if (gameOpt.isEmpty()) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No active game found.");
+                return;
+            }
+
+            var result = gameEngineService.approveClaim(gameOpt.get().getId(), claimId, ctx.getUser().getId());
+            sendMarkdown(ctx.getBot(), ctx.getChatId(),
+                    "✅ *Claim Approved!*\n\n" +
+                            "Winner Paid: `" + result.getRewardAmount() + "`\n" +
+                            "Platform Fee: `" + result.getPlatformFee() + "`\n" +
+                            "Agent Commission: `" + result.getAgentCommission() + "`\n\n" +
+                            "Game has ended.");
+        } catch (Exception e) {
+            sendMessage(ctx.getBot(), ctx.getChatId(), "Failed to approve claim: " + e.getMessage());
+        }
+    }
+
+    private void handleRejectClaim(CallbackContext ctx, String claimIdStr) {
+        try {
+            Long claimId = Long.parseLong(claimIdStr);
+            var gameOpt = gameService.findCurrentGameForAdmin(ctx.getUser().getId());
+            if (gameOpt.isEmpty()) {
+                sendMessage(ctx.getBot(), ctx.getChatId(), "No active game found.");
+                return;
+            }
+
+            gameEngineService.rejectClaim(gameOpt.get().getId(), claimId, ctx.getUser().getId(), "Rejected by admin");
+            sendMarkdown(ctx.getBot(), ctx.getChatId(),
+                    "❌ *Claim Rejected*\n\nGame has resumed.");
+        } catch (Exception e) {
+            sendMessage(ctx.getBot(), ctx.getChatId(), "Failed to reject claim: " + e.getMessage());
         }
     }
 

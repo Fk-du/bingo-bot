@@ -162,18 +162,25 @@ public class PlayerBotHandler {
         }
 
         var game = gameOpt.get();
-        if (game.getStatus() != com.bingo.app.tenant.enums.GameStatus.IN_PROGRESS &&
-                game.getStatus() != com.bingo.app.tenant.enums.GameStatus.CLAIM_PENDING) {
+        if (game.getStatus() != com.bingo.app.tenant.enums.GameStatus.IN_PROGRESS) {
             sendMessage(ctx.getBot(), ctx.getChatId(), "Game is not in progress.");
             return;
         }
 
         try {
-            var winner = gameEngineService.claimBingo(game.getId(), user.getId());
-            sendMarkdown(ctx.getBot(), ctx.getChatId(),
-                    "🎉 *BINGO! You Won!*\n\n" +
-                            "Reward: `" + winner.getRewardAmount() + "` points\n\n" +
-                            "Congratulations!");
+            var result = gameEngineService.claimBingo(game.getId(), user.getId());
+            if (result.isPendingReview()) {
+                sendMarkdown(ctx.getBot(), ctx.getChatId(),
+                        "🔔 *BINGO Claimed!*\n\n" +
+                                "Your claim is pending admin review.\n" +
+                                "Please wait for the admin to verify and approve your win.\n\n" +
+                                "Claim ID: `" + result.getClaimId() + "`");
+            } else {
+                sendMarkdown(ctx.getBot(), ctx.getChatId(),
+                        "🎉 *BINGO! You Won!*\n\n" +
+                                "Reward: `" + result.getRewardAmount() + "` points\n\n" +
+                                "Congratulations!");
+            }
         } catch (Exception e) {
             sendMessage(ctx.getBot(), ctx.getChatId(), "Claim failed: " + e.getMessage());
         }

@@ -144,6 +144,12 @@ public class CardService {
             throw new RuntimeException("Player already has a card for this game");
         }
 
+        // Enforce: player can only be in ONE active game at a time
+        var activeGameCards = gameCardRepository.findByPlayerIdAndActiveGames(playerId);
+        if (!activeGameCards.isEmpty()) {
+            throw new RuntimeException("You are already registered for an active game. Finish it before joining another.");
+        }
+
         // Check max players limit
         long currentPlayers = gameCardRepository.countByGameId(gameId);
         if (currentPlayers >= game.getMaxPlayers()) {

@@ -4,8 +4,10 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.CreateGameRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResultResponse;
 import com.bingo.app.tenant.dto.response.GameResponse;
+import com.bingo.app.tenant.dto.response.GameStateResponse;
 import com.bingo.app.tenant.dto.response.RegisterResponse;
 import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.service.CardService;
@@ -30,6 +32,15 @@ public class GameController {
     private final CardService cardService;
     private final TenantMapper tenantMapper;
 
+    @GetMapping("/{id}/state")
+    @PreAuthorize("hasRole('PLAYER')")
+    public ApiResponse<GameStateResponse> getGameState(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var state = gameEngineService.getGameState(id, principal.getUser().getId());
+        return ApiResponse.ok(tenantMapper.toGameStateDto(state));
+    }
+
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<GameResponse> createGame(
@@ -47,6 +58,15 @@ public class GameController {
         var game = gameService.startGameForAdmin(principal.getUser().getId(), id);
         gameEngineService.startCalling(game.getId());
         return ApiResponse.ok("Game started", tenantMapper.toDto(game));
+    }
+
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<String> cancelGame(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        gameService.cancelGame(id, principal.getUser().getId());
+        return ApiResponse.ok("Game cancelled");
     }
 
     @PostMapping("/{id}/pause")
@@ -114,12 +134,58 @@ public class GameController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) throws JsonProcessingException {
         var result = gameEngineService.claimBingo(id, principal.getUser().getId());
-        return ApiResponse.ok("Bingo claim processed", BingoClaimResultResponse.builder()
+        String message = result.isPendingReview()
+                ? "Bingo claimed! Waiting for admin review."
+                : "Bingo claim processed";
+        return ApiResponse.ok(message, BingoClaimResultResponse.builder()
                 .valid(result.isValid())
+                .claimId(result.getClaimId())
+                .pendingReview(result.isPendingReview())
                 .rewardAmount(result.getRewardAmount())
                 .platformFee(result.getPlatformFee())
                 .agentCommission(result.getAgentCommission())
                 .build());
+    }
+
+    @GetMapping("/{id}/claims/pending")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<List<BingoClaimResponse>> getPendingClaims(@PathVariable Long id) {
+        var claims = gameEngineService.getPendingClaims(id);
+        var dtos = claims.stream().map(tenantMapper::toDto).toList();
+        return ApiResponse.ok(dtos);
+    }
+
+    @PostMapping("/{id}/claims/{claimId}/approve")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<BingoClaimResultResponse> approveClaim(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @PathVariable Long claimId) {
+        var result = gameEngineService.approveClaim(id, claimId, principal.getUser().getId());
+        String message = result.isGameEnded()
+                ? "Claim approved, winner paid. Game ended (max winners reached)."
+                : "Claim approved, winner paid.";
+        return ApiResponse.ok(message, BingoClaimResultResponse.builder()
+                .valid(true)
+                .claimId(result.getClaimId())
+                .pendingReview(false)
+                .gameEnded(result.isGameEnded())
+                .approvedCount(result.getApprovedCount())
+                .rewardAmount(result.getRewardAmount())
+                .platformFee(result.getPlatformFee())
+                .agentCommission(result.getAgentCommission())
+                .build());
+    }
+
+    @PostMapping("/{id}/claims/{claimId}/reject")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<String> rejectClaim(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @PathVariable Long claimId,
+            @RequestParam(defaultValue = "Claim rejected by admin") String reason) {
+        gameEngineService.rejectClaim(id, claimId, principal.getUser().getId(), reason);
+        return ApiResponse.ok("Claim rejected, game resumed");
     }
 
     @GetMapping("/{id}/audit")

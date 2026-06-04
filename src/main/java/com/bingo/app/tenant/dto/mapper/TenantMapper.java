@@ -3,6 +3,7 @@ package com.bingo.app.tenant.dto.mapper;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.tenant.dto.response.*;
 import com.bingo.app.tenant.entity.*;
+import com.bingo.app.tenant.service.GameEngineService;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -99,6 +100,8 @@ public class TenantMapper {
                 .calledNumbersSnapshot(claim.getCalledNumbersSnapshot())
                 .result(claim.getResult())
                 .rewardAmount(claim.getRewardAmount())
+                .validatedBy(claim.getValidatedBy())
+                .rejectionReason(claim.getRejectionReason())
                 .claimedAt(claim.getClaimedAt())
                 .validatedAt(claim.getValidatedAt())
                 .build();
@@ -158,6 +161,21 @@ public class TenantMapper {
                 .details(auditLog.getDetails())
                 .ipAddress(auditLog.getIpAddress())
                 .createdAt(auditLog.getCreatedAt())
+                .build();
+    }
+
+    public GameStateResponse toGameStateDto(GameEngineService.GameState state) {
+        if (state == null) return null;
+        return GameStateResponse.builder()
+                .gameId(state.getGameId())
+                .status(state.getStatus())
+                .currentCallIndex(state.getCurrentCallIndex())
+                .totalNumbersCalled(state.getTotalNumbersCalled())
+                .calledNumbers(state.getCalledNumbers())
+                .prizePool(state.getPrizePool())
+                .playerCard(state.getPlayerCard())
+                .hasPlayerCard(state.isHasPlayerCard())
+                .isWinner(state.isWinner())
                 .build();
     }
 

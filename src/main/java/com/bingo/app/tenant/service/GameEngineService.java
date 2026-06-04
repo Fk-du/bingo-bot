@@ -223,15 +223,19 @@ public class GameEngineService {
     }
 
     /**
-     * Claim Bingo for a player
+     * Claim Bingo for a player — allows multiple simultaneous claims
      */
     @Transactional
     public BingoClaimResult claimBingo(Long gameId, Long playerId) throws JsonProcessingException {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
-        if (game.getStatus() != GameStatus.IN_PROGRESS) {
+        if (game.getStatus() != GameStatus.IN_PROGRESS && game.getStatus() != GameStatus.CLAIM_PENDING) {
             throw new RuntimeException("Game is not accepting claims");
+        }
+
+        if (bingoClaimRepository.existsByGameIdAndPlayerIdAndResult(gameId, playerId, "VALID")) {
+            throw new RuntimeException("You have already claimed Bingo in this game");
         }
 
         // Get player's card for this game
@@ -246,93 +250,196 @@ public class GameEngineService {
         Card card = gameCard.getCard();
         int[][] cardNumbers = parseCardNumbers(card.getNumbers());
 
-        // Validate Bingo
+        // Validate Bingo server-side
         boolean isValid = validateBingo(cardNumbers, calledNumbers, game.getWinningPattern());
 
-        // Create claim record
+        if (!isValid) {
+            bingoClaimRepository.save(BingoClaim.builder()
+                    .gameId(gameId)
+                    .playerId(playerId)
+                    .cardId(card.getId())
+                    .cardSnapshot(card.getNumbers())
+                    .calledNumbersSnapshot(objectMapper.writeValueAsString(calledNumbers))
+                    .result("INVALID")
+                    .rewardAmount(BigDecimal.ZERO)
+                    .validatedAt(LocalDateTime.now())
+                    .claimedAt(LocalDateTime.now())
+                    .build());
+
+            log.warn("Invalid Bingo claim from player {} in game {}", playerId, gameId);
+            throw new RuntimeException("Invalid Bingo claim — no matching pattern found");
+        }
+
+        // Pause on first claim only
+        boolean firstClaim = game.getStatus() == GameStatus.IN_PROGRESS;
+        if (firstClaim) {
+            stopCalling(gameId);
+            game.setStatus(GameStatus.CLAIM_PENDING);
+            gameRepository.save(game);
+        }
+
         BingoClaim claim = BingoClaim.builder()
                 .gameId(gameId)
                 .playerId(playerId)
                 .cardId(card.getId())
                 .cardSnapshot(card.getNumbers())
                 .calledNumbersSnapshot(objectMapper.writeValueAsString(calledNumbers))
-                .result(isValid ? "VALID" : "INVALID")
+                .result("VALID")
                 .claimedAt(LocalDateTime.now())
                 .build();
+        bingoClaimRepository.save(claim);
 
-        if (isValid) {
-            // Check for simultaneous claims
-            List<BingoClaim> validClaims = bingoClaimRepository
-                    .findByGameIdAndResult(gameId, "VALID");
+        log.info("Game {}: Bingo claimed by player {} (claimId={}), first={}",
+                gameId, playerId, claim.getId(), firstClaim);
 
-            if (!validClaims.isEmpty()) {
-                // Another player already claimed
-                claim.setRewardAmount(BigDecimal.ZERO);
-                bingoClaimRepository.save(claim);
-                throw new RuntimeException("Another player already claimed Bingo");
-            }
-
-            // End game with winner
-            return endGameWithWinner(game, playerId, claim);
-        } else {
-            // Invalid claim - disqualify player
-            claim.setRewardAmount(BigDecimal.ZERO);
-            claim.setValidatedAt(LocalDateTime.now());
-            bingoClaimRepository.save(claim);
-
-            log.warn("Invalid Bingo claim from player {} in game {}", playerId, gameId);
-            throw new RuntimeException("Invalid Bingo claim");
-        }
+        return BingoClaimResult.builder()
+                .valid(true)
+                .claimId(claim.getId())
+                .pendingReview(true)
+                .rewardAmount(BigDecimal.ZERO)
+                .build();
     }
 
     /**
-     * End game with a winner
+     * Approve a pending Bingo claim — pays the winner, allows up to MAX_WINNERS per game
      */
     @Transactional
-    public BingoClaimResult endGameWithWinner(Game game, Long winnerId, BingoClaim claim) {
-        // Stop number calling
-        stopCalling(game.getId());
+    public BingoClaimResult approveClaim(Long gameId, Long claimId, Long adminId) {
+        Game game = gameRepository.findByIdForUpdate(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
 
-        // Calculate prize distribution using configurable rates
+        if (game.getStatus() != GameStatus.CLAIM_PENDING) {
+            throw new RuntimeException("Game is not in CLAIM_PENDING state");
+        }
+
+        BingoClaim claim = bingoClaimRepository.findById(claimId)
+                .orElseThrow(() -> new RuntimeException("Claim not found"));
+
+        if (!claim.getGameId().equals(gameId)) {
+            throw new RuntimeException("Claim does not belong to this game");
+        }
+
+        if (!"VALID".equals(claim.getResult())) {
+            throw new RuntimeException("Only valid claims can be approved");
+        }
+
+        if (claim.getValidatedAt() != null) {
+            throw new RuntimeException("Claim already processed");
+        }
+
+        Long winnerId = claim.getPlayerId();
+
+        // Calculate prize distribution (each winner gets full prize minus fees)
         BigDecimal prizePool = game.getPrizePool();
         BigDecimal platformFee = prizePool.multiply(platformFeeRate);
         BigDecimal afterFee = prizePool.subtract(platformFee);
         BigDecimal agentCommission = afterFee.multiply(agentCommissionRate);
         BigDecimal winnerAmount = afterFee.subtract(agentCommission);
 
-        // Update game status
-        game.setStatus(GameStatus.ENDED);
-        game.setEndTime(LocalDateTime.now());
-        gameRepository.save(game);
-
         // Mark winner card
-        GameCard winnerCard = gameCardRepository.findByGameIdAndPlayerId(game.getId(), winnerId)
+        GameCard winnerCard = gameCardRepository.findByGameIdAndPlayerId(gameId, winnerId)
                 .orElseThrow(() -> new RuntimeException("Winner card not found"));
         winnerCard.setWinner(true);
         gameCardRepository.save(winnerCard);
 
         // Credit winnings to player
-        walletService.creditWinnings(winnerId, winnerAmount, game.getId());
+        walletService.creditWinnings(winnerId, winnerAmount, gameId);
 
         // Deduct platform fee from agent
-        walletService.deductPlatformFee(game.getAgentId(), platformFee, game.getId());
+        walletService.deductPlatformFee(game.getAgentId(), platformFee, gameId);
 
-        // Update claim
+        // Update approved claim
         claim.setRewardAmount(winnerAmount);
+        claim.setValidatedBy(adminId);
         claim.setValidatedAt(LocalDateTime.now());
         bingoClaimRepository.save(claim);
 
         // Update player's card stats
-        cardService.markCardAsWinner(game.getId(), winnerId);
+        cardService.markCardAsWinner(gameId, winnerId);
 
-        log.info("Game {} ended. Winner: {}, Prize: {}", game.getId(), winnerId, winnerAmount);
+        // Count how many winners so far
+        long approvedCount = bingoClaimRepository
+                .countByGameIdAndResultAndValidatedAtIsNotNull(gameId, "VALID");
+        boolean gameEnded = false;
+
+        if (approvedCount >= MAX_WINNERS) {
+            // Max winners reached — end the game
+            game.setStatus(GameStatus.ENDED);
+            game.setEndTime(LocalDateTime.now());
+            gameRepository.save(game);
+            stopCalling(gameId);
+
+            // Auto-reject remaining pending claims
+            List<BingoClaim> remaining = bingoClaimRepository
+                    .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
+            for (BingoClaim other : remaining) {
+                other.setResult("REJECTED");
+                other.setValidatedBy(adminId);
+                other.setValidatedAt(LocalDateTime.now());
+                other.setRejectionReason("Max winners reached");
+                bingoClaimRepository.save(other);
+            }
+            gameEnded = true;
+
+            log.info("Game {}: Max winners ({}) reached. Game ended.", gameId, MAX_WINNERS);
+        }
+
+        log.info("Game {}: Admin {} approved claim {}. Winner: {} (winner #{}/{}), Prize: {}",
+                gameId, adminId, claimId, winnerId, approvedCount, MAX_WINNERS, winnerAmount);
 
         return BingoClaimResult.builder()
                 .valid(true)
+                .claimId(claimId)
+                .pendingReview(false)
+                .gameEnded(gameEnded)
+                .approvedCount((int) approvedCount)
                 .rewardAmount(winnerAmount)
                 .platformFee(platformFee)
                 .agentCommission(agentCommission)
                 .build();
+    }
+
+    /**
+     * Reject a pending Bingo claim — game resumes only when no claims remain
+     */
+    @Transactional
+    public void rejectClaim(Long gameId, Long claimId, Long adminId, String reason) {
+        Game game = gameRepository.findByIdForUpdate(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+
+        if (game.getStatus() != GameStatus.CLAIM_PENDING) {
+            throw new RuntimeException("Game is not in CLAIM_PENDING state");
+        }
+
+        BingoClaim claim = bingoClaimRepository.findById(claimId)
+                .orElseThrow(() -> new RuntimeException("Claim not found"));
+
+        if (!claim.getGameId().equals(gameId)) {
+            throw new RuntimeException("Claim does not belong to this game");
+        }
+
+        if (claim.getValidatedAt() != null) {
+            throw new RuntimeException("Claim already processed");
+        }
+
+        // Mark claim as rejected
+        claim.setResult("REJECTED");
+        claim.setValidatedBy(adminId);
+        claim.setValidatedAt(LocalDateTime.now());
+        claim.setRejectionReason(reason);
+        bingoClaimRepository.save(claim);
+
+        // Resume game only if no other valid pending claims
+        long remaining = bingoClaimRepository.countByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
+        if (remaining == 0) {
+            game.setStatus(GameStatus.IN_PROGRESS);
+            gameRepository.save(game);
+            startCalling(gameId);
+            log.info("Game {}: All claims resolved, game resumed.", gameId);
+        }
+
+        log.info("Game {}: Admin {} rejected claim {}. Reason: {}.",
+                gameId, adminId, claimId, reason);
     }
 
     /**
@@ -467,6 +574,15 @@ public class GameEngineService {
     }
 
     /**
+     * Get all pending (unresolved) valid claims for a game
+     */
+    @Transactional(readOnly = true)
+    public List<BingoClaim> getPendingClaims(Long gameId) {
+        return bingoClaimRepository
+                .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
+    }
+
+    /**
      * Resume number calling
      */
     public void resumeGame(Long gameId) {
@@ -485,11 +601,17 @@ public class GameEngineService {
         log.info("Game {} resumed", gameId);
     }
 
+    private static final int MAX_WINNERS = 3;
+
     // Inner classes
     @lombok.Builder
     @lombok.Data
     public static class BingoClaimResult {
         private boolean valid;
+        private Long claimId;
+        private boolean pendingReview;
+        private boolean gameEnded;
+        private int approvedCount;
         private BigDecimal rewardAmount;
         private BigDecimal platformFee;
         private BigDecimal agentCommission;

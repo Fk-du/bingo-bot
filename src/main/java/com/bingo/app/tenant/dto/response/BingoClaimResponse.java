@@ -15,6 +15,8 @@ public record BingoClaimResponse(
         String calledNumbersSnapshot,
         String result,
         BigDecimal rewardAmount,
+        Long validatedBy,
+        String rejectionReason,
         LocalDateTime claimedAt,
         LocalDateTime validatedAt
 ) {}

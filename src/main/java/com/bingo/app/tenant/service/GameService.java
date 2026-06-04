@@ -32,6 +32,10 @@ public class GameService {
      */
     @Transactional
     public Game createGameWithEntryFee(Long agentId, CreateGameRequest request) {
+        if (gameRepository.hasActiveGame(agentId)) {
+            throw new RuntimeException("Agent already has an active game");
+        }
+
         Game game = Game.builder()
                 .agentId(agentId)
                 .status(GameStatus.REGISTRATION_OPEN)
@@ -104,6 +108,29 @@ public class GameService {
         Game saved = gameRepository.save(game);
         log.info("Game started: id={}, agentId={}", gameId, agentId);
         return saved;
+    }
+
+    /**
+     * Cancel a game in REGISTRATION_OPEN (not enough players, etc.)
+     */
+    @Transactional
+    public void cancelGame(Long gameId, Long agentId) {
+        Game game = gameRepository.findByIdForUpdate(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+
+        if (!game.getAgentId().equals(agentId)) {
+            throw new RuntimeException("Game does not belong to this agent");
+        }
+
+        if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
+            throw new RuntimeException("Can only cancel a game that hasn't started yet");
+        }
+
+        game.setStatus(GameStatus.ENDED);
+        game.setEndTime(LocalDateTime.now());
+        gameRepository.save(game);
+
+        log.info("Game cancelled: id={}, agentId={}", gameId, agentId);
     }
 
     /**

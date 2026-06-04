@@ -66,15 +66,18 @@ public class MenuService {
                         createButton("▶️ Start Game", BotConstants.START_GAME)
                 ));
                 keyboard.add(createRow(
-                        createButton("🔢 Call Number", BotConstants.CALL_NUMBER),
-                        createButton("👥 My Players", BotConstants.MY_PLAYERS)
+                        createButton("❌ Cancel Game", BotConstants.CANCEL_GAME),
+                        createButton("🔔 Pending Claims", BotConstants.PENDING_CLAIMS)
                 ));
                 keyboard.add(createRow(
                         createButton("🔗 Invite Link", BotConstants.INVITE_LINK),
-                        createButton("💰 Fund Player", BotConstants.FUND_PLAYER)
+                        createButton("👥 My Players", BotConstants.MY_PLAYERS)
                 ));
                 keyboard.add(createRow(
-                        createButton("📤 Withdrawals", BotConstants.WITHDRAW_REQUESTS),
+                        createButton("💰 Fund Player", BotConstants.FUND_PLAYER),
+                        createButton("📤 Withdrawals", BotConstants.WITHDRAW_REQUESTS)
+                ));
+                keyboard.add(createRow(
                         createButton("📊 Stats", BotConstants.ADMIN_STATS)
                 ));
                 keyboard.add(createRow(

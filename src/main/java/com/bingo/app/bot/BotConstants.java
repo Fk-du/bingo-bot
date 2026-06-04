@@ -16,12 +16,15 @@ public class BotConstants {
     // Admin Actions
     public static final String CREATE_GAME = "CREATE_GAME";
     public static final String START_GAME = "START_GAME";
-    public static final String CALL_NUMBER = "CALL_NUMBER";
+    public static final String CANCEL_GAME = "CANCEL_GAME";
     public static final String INVITE_LINK = "INVITE_LINK";
     public static final String MY_PLAYERS = "MY_PLAYERS";
     public static final String FUND_PLAYER = "FUND_PLAYER";
     public static final String WITHDRAW_REQUESTS = "WITHDRAW_REQUESTS";
     public static final String ADMIN_STATS = "ADMIN_STATS";
+    public static final String PENDING_CLAIMS = "PENDING_CLAIMS";
+    public static final String APPROVE_CLAIM = "APPROVE_CLAIM";
+    public static final String REJECT_CLAIM = "REJECT_CLAIM";
 
     // Super Admin Actions
     public static final String CREATE_AGENT = "CREATE_AGENT";

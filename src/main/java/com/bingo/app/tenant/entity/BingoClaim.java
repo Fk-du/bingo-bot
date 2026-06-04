@@ -33,8 +33,15 @@ public class BingoClaim {
     private String calledNumbersSnapshot;
 
     private String result;
+
     @Column(name = "reward_amount")
     private BigDecimal rewardAmount;
+
+    @Column(name = "validated_by")
+    private Long validatedBy;
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
 
     @Builder.Default
     @Column(name = "claimed_at")
