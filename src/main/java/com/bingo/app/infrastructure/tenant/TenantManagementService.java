@@ -104,14 +104,21 @@ public class TenantManagementService {
 
             log.info("Connected to database: {}", conn.getMetaData().getURL());
 
+            stmt.execute("SET search_path TO public");
+
+            try {
+                stmt.execute("GRANT ALL ON SCHEMA public TO PUBLIC");
+            } catch (Exception e) {
+                log.debug("Could not grant schema permissions (may not be superuser): {}", e.getMessage());
+            }
+
             try (var rs = stmt.executeQuery(
-                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tenant_registry')")) {
+                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tenant_registry' AND table_schema = 'public')")) {
                 if (rs.next() && rs.getBoolean(1)) {
                     log.info("Master schema already exists.");
                     return;
                 }
             }
-            log.info("Master schema tables not found. Creating them now...");
 
             String[] masterTables = {
                 "CREATE TABLE IF NOT EXISTS users (" +
@@ -150,7 +157,7 @@ public class TenantManagementService {
             }
 
             try (var rs = stmt.executeQuery(
-                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tenant_registry')")) {
+                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tenant_registry' AND table_schema = 'public')")) {
                 if (rs.next() && rs.getBoolean(1)) {
                     log.info("Master schema created successfully.");
                 } else {
@@ -181,7 +188,7 @@ public class TenantManagementService {
 
     private void initializeTenantSchema(String tenantId, String databaseName) {
         try {
-            var resource = new ClassPathResource("db/migration/V1__initial_schema.sql");
+            var resource = new ClassPathResource("db/migration/V1__tenant_schema.sql");
             String sql;
             try (var reader = new BufferedReader(new InputStreamReader(resource.getInputStream()))) {
                 sql = reader.lines().collect(Collectors.joining("\n"));
@@ -192,6 +199,9 @@ public class TenantManagementService {
                  Statement stmt = conn.createStatement()) {
 
                 conn.setCatalog(databaseName);
+                
+                // Set search_path to public schema before creating tables
+                stmt.execute("SET search_path TO public");
 
                 String[] statements = sql.split(";");
                 for (String st : statements) {

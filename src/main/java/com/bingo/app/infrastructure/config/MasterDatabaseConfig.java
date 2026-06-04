@@ -78,6 +78,7 @@ public class MasterDatabaseConfig {
         props.setProperty("hibernate.dialect", hibernateDialect);
         props.setProperty("hibernate.show_sql", "true");
         props.setProperty("hibernate.format_sql", "true");
+        props.setProperty("hibernate.default_schema", "public");
         emf.setJpaProperties(props);
 
         return emf;
