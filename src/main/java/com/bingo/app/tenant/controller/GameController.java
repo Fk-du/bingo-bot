@@ -106,12 +106,7 @@ public class GameController {
                 return ApiResponse.ok(game.map(g -> List.of(tenantMapper.toDto(g))).orElse(List.of()));
             }
             default -> {
-                var all = gameService.findAllGames();
-                var active = all.stream()
-                        .filter(g -> g.getStatus() != GameStatus.ENDED)
-                        .map(tenantMapper::toDto)
-                        .toList();
-                return ApiResponse.ok(active);
+                return ApiResponse.ok(List.of());
             }
         }
     }

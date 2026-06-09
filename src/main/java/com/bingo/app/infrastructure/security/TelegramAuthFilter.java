@@ -1,5 +1,6 @@
 package com.bingo.app.infrastructure.security;
 
+import com.bingo.app.infrastructure.persistence.TenantHelper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,28 +25,33 @@ public class TelegramAuthFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
+        try {
+            String authHeader = request.getHeader("Authorization");
 
-        String authHeader = request.getHeader("Authorization");
+            if (authHeader != null && authHeader.startsWith("tma ")) {
+                String initData = authHeader.substring(4);
 
-        if (authHeader != null && authHeader.startsWith("tma ")) {
-            String initData = authHeader.substring(4);
+                try {
+                    var user = telegramAuthService.authenticate(initData);
 
-            try {
-                var user = telegramAuthService.authenticate(initData);
-
-                if (user != null) {
-                    UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-                    SecurityContextHolder.getContext().setAuthentication(auth);
-                    log.debug("User authenticated: {}", user.getTelegramId());
-                } else {
-                    log.warn("Authentication failed for token");
+                    if (user != null) {
+                        UserPrincipal principal = new UserPrincipal(user);
+                        UsernamePasswordAuthenticationToken auth =
+                                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+                        SecurityContextHolder.getContext().setAuthentication(auth);
+                        TenantHelper.setFromUser(user);
+                        log.debug("User authenticated: {}", user.getTelegramId());
+                    } else {
+                        log.warn("Authentication failed for token");
+                    }
+                } catch (Exception e) {
+                    log.error("Authentication failed: {}", e.getMessage());
                 }
-            } catch (Exception e) {
-                log.error("Authentication failed: {}", e.getMessage());
             }
-        }
 
-        chain.doFilter(request, response);
+            chain.doFilter(request, response);
+        } finally {
+            TenantHelper.clear();
+        }
     }
 }
