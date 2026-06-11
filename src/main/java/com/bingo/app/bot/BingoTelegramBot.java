@@ -26,18 +26,21 @@ public class BingoTelegramBot extends TelegramLongPollingBot {
     @Value("${app.telegram.bot.token}")
     private String token;
 
+    private Long botId;
+
     @PostConstruct
     public void init() {
         log.info("Initializing Telegram Bot: @{}", username);
         log.info("Bot token configured: {}", token != null ? "YES (length: " + token.length() + ")" : "NO");
 
         if (token == null || token.isEmpty() || token.equals("your_bot_token")) {
-            log.error("BOT_TOKEN is not properly configured! Please check your .env file");
+            log.error("BOT_TOKEN is not properly configured! Please check your ..env file");
             throw new IllegalStateException("Telegram bot token is not configured");
         }
 
         try {
             var me = execute(new GetMe());
+            botId = me.getId();
             log.info("Bot connected: id={}, username=@{}", me.getId(), me.getUserName());
         } catch (TelegramApiException e) {
             log.error("Failed to connect bot: {}", e.getMessage());
@@ -58,5 +61,9 @@ public class BingoTelegramBot extends TelegramLongPollingBot {
     @Override
     public String getBotToken() {
         return token;
+    }
+
+    public Long getBotId() {
+        return botId;
     }
 }

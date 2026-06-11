@@ -34,8 +34,9 @@ public class TelegramAuthFilter extends OncePerRequestFilter {
                 var user = telegramAuthService.authenticate(initData);
 
                 if (user != null) {
+                    UserPrincipal principal = new UserPrincipal(user);
                     UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
+                            new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
                     SecurityContextHolder.getContext().setAuthentication(auth);
                     log.debug("User authenticated: {}", user.getTelegramId());
                 } else {

@@ -14,7 +14,7 @@ import java.util.List;
 
 @Entity
 @Table(name = "users", indexes = {
-        @Index(name = "idx_users_telegram", columnList = "telegram_id"),
+        @Index(name = "idx_users_telegram", columnList = "telegramid"),
         @Index(name = "idx_users_agent", columnList = "agent_id"),
         @Index(name = "idx_users_parent", columnList = "parent_id")
 })
@@ -29,7 +29,7 @@ public class User implements UserDetails {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "telegram_id", unique = true, nullable = false)
+    @Column(name = "telegramid", unique = true, nullable = false)
     private Long telegramId;
 
     @Column(name = "username")
