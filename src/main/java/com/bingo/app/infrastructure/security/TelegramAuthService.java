@@ -5,6 +5,8 @@ import com.bingo.app.master.entity.User;
 import com.bingo.app.master.service.UserService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -12,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URLDecoder;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -38,6 +41,7 @@ public class TelegramAuthService {
 
     public User authenticate(String initData) {
         try {
+            log.debug("Authenticating with initData: {}", initData);
             Map<String, String> params = parseInitData(initData);
             log.debug(
                     "Telegram auth payload keys={}, hashPresent={}, signaturePresent={}, botId={}, initDataLength={}",
@@ -48,7 +52,7 @@ public class TelegramAuthService {
                     initData != null ? initData.length() : 0
             );
 
-            if (!verifySignature(params, initData)) {
+            if (!verifySignature(params)) {
                 log.warn("Invalid Telegram signature");
                 return null;
             }
