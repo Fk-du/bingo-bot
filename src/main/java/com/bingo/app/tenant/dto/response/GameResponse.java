@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @Builder
 public record GameResponse(
         Long id,
-        Long agentId,
+        Long adminUserId,
         GameStatus status,
         BigDecimal entryFee,
         Integer maxPlayers,

@@ -13,7 +13,7 @@ public class TenantMapper {
         if (game == null) return null;
         return GameResponse.builder()
                 .id(game.getId())
-                .agentId(game.getAgentId())
+                .adminUserId(game.getAdminUserId())
                 .status(game.getStatus())
                 .entryFee(game.getEntryFee())
                 .maxPlayers(game.getMaxPlayers())
@@ -33,7 +33,7 @@ public class TenantMapper {
         return PlayerResponse.builder()
                 .id(player.getId())
                 .userId(player.getUserId())
-                .agentId(player.getAgentId())
+                .adminUserId(player.getAdminUserId())
                 .parentId(player.getParentId())
                 .createdAt(player.getCreatedAt())
                 .build();

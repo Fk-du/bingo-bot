@@ -42,7 +42,7 @@ public class ReportController {
     public ApiResponse<List<GameResponse>> gameHistory(@AuthenticationPrincipal UserPrincipal principal) {
         var user = principal.getUser();
         var games = switch (user.getRole()) {
-            case ADMIN -> gameService.getAllGamesForAgent(user.getId());
+            case ADMIN -> gameService.getAllGamesForAdmin(user.getId());
             default -> gameService.findAllGames();
         };
         return ApiResponse.ok(games.stream().map(tenantMapper::toDto).toList());

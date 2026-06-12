@@ -9,9 +9,9 @@ import java.util.Optional;
 @Repository
 public interface TenantRegistryRepository extends JpaRepository<TenantRegistry, Long> {
 
-    Optional<TenantRegistry> findByAgentId(Long agentId);
+    Optional<TenantRegistry> findByAdminUserId(Long adminUserId);
 
-    boolean existsByAgentId(Long agentId);
+    boolean existsByAdminUserId(Long adminUserId);
 
     Optional<TenantRegistry> findByDatabaseName(String databaseName);
 }

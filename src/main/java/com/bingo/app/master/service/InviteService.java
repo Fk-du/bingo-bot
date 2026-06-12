@@ -2,6 +2,8 @@ package com.bingo.app.master.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.infrastructure.persistence.TenantManagementService;
+import com.bingo.app.master.dto.request.CreateAdminRequest;
+import com.bingo.app.master.dto.request.CreatePlayerRequest;
 import com.bingo.app.master.entity.InviteCode;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
@@ -31,13 +33,14 @@ public class InviteService {
     /**
      * Generate an invite link for a user
      */
+    @Transactional
     public String generateInviteLinkForUser(Long creatorId, String botUsername) {
         User creator = userRepository.findById(creatorId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         Role targetRole = creator.getRole() == Role.SUPER_ADMIN ? Role.ADMIN : Role.PLAYER;
 
-        // Admin/tenant player invites are permanent — reuse existing active code if any
+        // Admin player invites are permanent — reuse existing active code if any
         if (targetRole == Role.PLAYER) {
             List<InviteCode> existing = inviteCodeRepository.findByCreatorIdAndActiveTrue(creatorId);
             if (!existing.isEmpty()) {
@@ -50,6 +53,7 @@ public class InviteService {
 
         InviteCode inviteCode = InviteCode.builder()
                 .code(code)
+                .adminId(creatorId)
                 .creatorId(creatorId)
                 .role(targetRole)
                 .active(true)
@@ -91,39 +95,37 @@ public class InviteService {
         User newUser;
 
         if (inviteCode.getRole() == Role.ADMIN) {
-            // Create new agent (also creates tenant database)
-            newUser = userService.createAgent(
+            // Create new admin (also creates tenant database)
+            newUser = userService.createAdmin(new CreateAdminRequest(
                     creator.getId(),
                     telegramId,
                     username,
                     firstName,
                     lastName
-            );
+            ));
 
-            log.info("New agent registered: id={}, telegramId={}", newUser.getId(), telegramId);
+            log.info("New admin registered: id={}, telegramId={}", newUser.getId(), telegramId);
 
         } else {
             // Create new player
-            Long agentId = creator.getRole() == Role.ADMIN ? creator.getId() : creator.getAgentId();
+            Long adminUserId = creator.getRole() == Role.ADMIN ? creator.getId() : creator.getAdminUserId();
 
-            if (agentId == null) {
-                throw new RuntimeException("Cannot create player: no agent assigned");
+            if (adminUserId == null) {
+                throw new RuntimeException("Cannot create player: no admin assigned");
             }
 
-            // Ensure the admin's tenant database exists (recover from partial creation)
-            tenantManagementService.createTenant(agentId);
+            tenantManagementService.createTenant(adminUserId);
 
-            newUser = userService.createPlayer(
-                    agentId,
+            newUser = userService.createPlayer(new CreatePlayerRequest(
+                    adminUserId,
                     telegramId,
                     username,
                     firstName,
                     lastName,
-                    agentId
-            );
+                    adminUserId
+            ));
 
-            // Set tenant context for the agent's database to assign a card
-            String tenant = TenantContext.getAgentTenant(agentId);
+            String tenant = TenantContext.tenantKeyForAdmin(adminUserId);
             TenantContext.setTenant(tenant);
             try {
                 cardService.assignNewCardToPlayer(newUser.getId());
@@ -134,11 +136,11 @@ public class InviteService {
                 TenantContext.clear();
             }
 
-            log.info("New player registered: id={}, telegramId={}, agentId={}",
-                    newUser.getId(), telegramId, agentId);
+            log.info("New player registered: id={}, telegramId={}, adminUserId={}",
+                    newUser.getId(), telegramId, adminUserId);
         }
 
-        // Deactivate ADMIN invite codes after use (single-use per admin/tenant).
+        // Deactivate ADMIN invite codes after use (single-use per admin).
         // PLAYER invite codes remain active forever so admins can share a permanent link.
         if (inviteCode.getRole() == Role.ADMIN) {
             inviteCode.setActive(false);

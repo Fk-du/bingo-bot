@@ -1,7 +1,7 @@
 package com.bingo.app.infrastructure.persistence;
 
+import com.bingo.app.common.util.AdminIds;
 import com.bingo.app.master.entity.User;
-import com.bingo.app.master.enums.Role;
 import com.bingo.app.infrastructure.security.UserPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -29,12 +29,9 @@ public class TenantInterceptor implements HandlerInterceptor {
                 return true;
             }
 
-            if (user.getRole() == Role.SUPER_ADMIN) {
-                TenantContext.setTenant("master");
-            } else if (user.getRole() == Role.ADMIN) {
-                TenantContext.setTenant("agent_" + user.getId());
-            } else if (user.getRole() == Role.PLAYER && user.getAgentId() != null) {
-                TenantContext.setTenant("agent_" + user.getAgentId());
+            Long adminUserId = AdminIds.adminUserId(user);
+            if (adminUserId != null) {
+                TenantContext.setTenant(TenantContext.tenantKeyForAdmin(adminUserId));
             } else {
                 TenantContext.setTenant("master");
             }

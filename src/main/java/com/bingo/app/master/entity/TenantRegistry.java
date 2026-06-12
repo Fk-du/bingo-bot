@@ -18,10 +18,10 @@ public class TenantRegistry {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "agent_id", unique = true)
-    private Long agentId;
+    @Column(name = "admin_user_id", unique = true)
+    private Long adminUserId;
 
-    @Column(name = "database_name", unique = true, nullable = false)
+    @Column(name = "database_name", unique = true)
     private String databaseName;
 
     @Builder.Default

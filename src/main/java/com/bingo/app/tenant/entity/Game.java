@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "games", indexes = {
-        @Index(name = "idx_games_agent_status", columnList = "agent_id, status"),
+        @Index(name = "idx_games_admin_status", columnList = "admin_user_id, status"),
         @Index(name = "idx_games_status", columnList = "status")
 })
 @Getter
@@ -23,8 +23,8 @@ public class Game {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "agent_id")
-    private Long agentId;
+    @Column(name = "admin_user_id")
+    private Long adminUserId;
 
     @Enumerated(EnumType.STRING)
     private GameStatus status;

@@ -7,9 +7,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Builder
-public record AgentFundRequestResponse(
+public record AdminFundRequestResponse(
         Long id,
-        Long agentId,
+        Long adminUserId,
         BigDecimal amount,
         String screenshotUrl,
         FundStatus status,

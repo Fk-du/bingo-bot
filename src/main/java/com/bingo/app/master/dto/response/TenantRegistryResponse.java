@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 @Builder
 public record TenantRegistryResponse(
         Long id,
-        Long agentId,
+        Long adminUserId,
         String databaseName,
         LocalDateTime createdAt
 ) {}

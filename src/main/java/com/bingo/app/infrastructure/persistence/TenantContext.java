@@ -17,11 +17,11 @@ public class TenantContext {
         return MASTER.equals(getTenant());
     }
 
-    public static String getAgentTenant(Long agentId) {
-        return "agent_" + agentId;
+    public static String tenantKeyForAdmin(Long adminUserId) {
+        return "agent_" + adminUserId;
     }
 
-    public static Long parseAgentIdFromTenant(String tenantId) {
+    public static Long parseAdminUserIdFromTenantKey(String tenantId) {
         if (tenantId == null || !tenantId.startsWith("agent_")) {
             return null;
         }

@@ -1,6 +1,7 @@
 package com.bingo.app.tenant.controller;
 
 import com.bingo.app.infrastructure.security.UserPrincipal;
+import com.bingo.app.tenant.dto.request.BuyPointsRequest;
 import com.bingo.app.tenant.dto.request.CoinRequestAction;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
@@ -12,9 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/coins")
@@ -27,11 +26,9 @@ public class CoinController {
     @PostMapping("/requests")
     public ApiResponse<CoinRequestResponse> createRequest(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestBody Map<String, Object> body) {
-        BigDecimal amount = new BigDecimal(body.getOrDefault("amount", "0").toString());
-        String screenshotUrl = (String) body.get("screenshotUrl");
-        var request = walletService.buyPoints(principal.getUser().getId(), amount, screenshotUrl);
-        return ApiResponse.ok("Coin request created", tenantMapper.toDto(request));
+            @Valid @RequestBody BuyPointsRequest request) {
+        var coinRequest = walletService.buyPoints(principal.getUser().getId(), request.amount(), request.screenshotUrl());
+        return ApiResponse.ok("Coin request created", tenantMapper.toDto(coinRequest));
     }
 
     @GetMapping("/requests")
@@ -39,7 +36,7 @@ public class CoinController {
         var user = principal.getUser();
         switch (user.getRole()) {
             case ADMIN -> {
-                var requests = walletService.getPendingCoinRequestsForAgent(user.getId())
+                var requests = walletService.getPendingCoinRequestsForAdmin(user.getId())
                         .stream()
                         .map(tenantMapper::toDto)
                         .toList();

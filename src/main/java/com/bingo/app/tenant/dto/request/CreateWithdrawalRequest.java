@@ -1,10 +1,11 @@
 package com.bingo.app.tenant.dto.request;
 
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.NotBlank;
 
 import java.math.BigDecimal;
 
-public record AgentFundRequestCreate(
+public record CreateWithdrawalRequest(
         @Positive BigDecimal amount,
-        String screenshotUrl
+        @NotBlank String payoutDetails
 ) {}

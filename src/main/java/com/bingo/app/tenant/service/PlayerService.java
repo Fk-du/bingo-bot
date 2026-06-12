@@ -19,10 +19,10 @@ public class PlayerService {
     private final PlayerRepository playerRepository;
 
     @Transactional
-    public Player createPlayer(Long userId, Long agentId, Long parentId) {
+    public Player createPlayer(Long userId, Long adminUserId, Long parentId) {
         Player player = Player.builder()
                 .userId(userId)
-                .agentId(agentId)
+                .adminUserId(adminUserId)
                 .parentId(parentId)
                 .balance(BigDecimal.ZERO)
                 .frozenBalance(BigDecimal.ZERO)
@@ -43,8 +43,8 @@ public class PlayerService {
     }
 
     @Transactional(readOnly = true)
-    public List<Player> getPlayersByAgent(Long agentId) {
-        return playerRepository.findByAgentId(agentId);
+    public List<Player> getPlayersByAdmin(Long adminUserId) {
+        return playerRepository.findByAdminUserId(adminUserId);
     }
 
     @Transactional(readOnly = true)
@@ -53,8 +53,8 @@ public class PlayerService {
     }
 
     @Transactional(readOnly = true)
-    public long countByAgentId(Long agentId) {
-        return playerRepository.countByAgentId(agentId);
+    public long countByAdminUserId(Long adminUserId) {
+        return playerRepository.countByAdminUserId(adminUserId);
     }
 
     @Transactional(readOnly = true)
@@ -63,8 +63,8 @@ public class PlayerService {
     }
 
     @Transactional(readOnly = true)
-    public List<Long> getPlayerIdsByAgent(Long agentId) {
-        return playerRepository.findByAgentId(agentId).stream()
+    public List<Long> getPlayerIdsByAdmin(Long adminUserId) {
+        return playerRepository.findByAdminUserId(adminUserId).stream()
                 .map(Player::getUserId)
                 .toList();
     }

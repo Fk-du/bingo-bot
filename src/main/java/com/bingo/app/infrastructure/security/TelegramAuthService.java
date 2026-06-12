@@ -87,7 +87,7 @@ public class TelegramAuthService {
                 ));
     }
 
-    private boolean verifySignature(Map<String, String> params, String initData) {
+    private boolean verifySignature(Map<String, String> params) {
         String signatureValue = params.get("signature");
         String hash = params.remove("hash");
         params.remove("signature");

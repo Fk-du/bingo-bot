@@ -8,20 +8,24 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.stereotype.Service;
 
 import javax.sql.DataSource;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
-import java.util.stream.Collectors;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class TenantManagementService {
+
+    private static final List<String> TENANT_SQL_SCRIPTS = List.of(
+            "db/migration/V1__initial_tenant_schema.sql",
+            "db/migration/V2__add_player_balance.sql"
+    );
 
     private final TenantRegistryRepository tenantRegistryRepository;
     private final DataSource masterDataSource;
@@ -41,33 +45,50 @@ public class TenantManagementService {
     public void init() {
         log.info("Ensuring master schema exists...");
         ensureMasterSchema();
+        runMasterMigrations();
+        migrateExistingTenants();
     }
 
-    // NOT @Transactional — CREATE DATABASE cannot run inside a transaction block.
-    // Individual JpaRepository calls handle their own implicit transactions.
-    // Fully idempotent: safe to call multiple times for the same agent.
-    public TenantRegistry createTenant(Long agentId) {
-        String databaseName = "bingo_agent_" + agentId;
+    public TenantRegistry createTenant(Long adminUserId) {
+        String databaseName = "bingo_agent_" + adminUserId;
 
-        // Always create the database (safe with IF NOT EXISTS equivalent in the catch)
         createDatabase(databaseName);
-        // Always re-initialize the schema (all statements use CREATE IF NOT EXISTS)
         initializeTenantSchema(databaseName);
 
-        // Upsert tenant registry entry
-        TenantRegistry registry = tenantRegistryRepository.findByAgentId(agentId)
+        TenantRegistry registry = tenantRegistryRepository.findByAdminUserId(adminUserId)
                 .orElseGet(() -> TenantRegistry.builder()
-                        .agentId(agentId)
+                        .adminUserId(adminUserId)
                         .databaseName(databaseName)
                         .build());
         registry.setDatabaseName(databaseName);
         TenantRegistry saved = tenantRegistryRepository.save(registry);
 
-        // Ensure routing datasource has this tenant
-        routingDataSource.addTenant("agent_" + agentId, databaseName);
+        routingDataSource.addTenant("agent_" + adminUserId, databaseName);
 
-        log.info("Tenant ensured: {} for agent {}", databaseName, agentId);
+        log.info("Tenant ensured: {} for admin user {}", databaseName, adminUserId);
         return saved;
+    }
+
+    private void migrateExistingTenants() {
+        List<TenantRegistry> registries;
+        try {
+            registries = tenantRegistryRepository.findAll();
+        } catch (Exception e) {
+            log.warn("Could not load tenant registry via JPA: {}", e.getMessage());
+            return;
+        }
+
+        for (TenantRegistry registry : registries) {
+            try {
+                createDatabase(registry.getDatabaseName());
+                initializeTenantSchema(registry.getDatabaseName());
+                routingDataSource.addTenant(
+                        "agent_" + registry.getAdminUserId(),
+                        registry.getDatabaseName());
+            } catch (Exception e) {
+                log.error("Failed to migrate tenant database {}: {}", registry.getDatabaseName(), e.getMessage(), e);
+            }
+        }
     }
 
     private void createDatabase(String databaseName) {
@@ -90,38 +111,33 @@ public class TenantManagementService {
 
     private void initializeTenantSchema(String databaseName) {
         try {
-            String schemaSql = loadSchemaSql();
-
-            // Build tenant JDBC URL by replacing the database name in the base URL
             String tenantUrl = tenantBaseUrl.replaceAll("/\\w+$", "/" + databaseName);
 
-            log.info("Connecting to tenant database: {}", tenantUrl);
+            log.info("Applying tenant schema migrations to: {}", tenantUrl);
             try (Connection conn = DriverManager.getConnection(tenantUrl, tenantUsername, tenantPassword)) {
+                conn.setAutoCommit(true);
                 try (Statement stmt = conn.createStatement()) {
                     stmt.execute("CREATE SCHEMA IF NOT EXISTS public");
-                    for (String sql : schemaSql.split(";")) {
-                        String trimmed = sql.trim();
-                        if (!trimmed.isEmpty()) {
-                            trimmed = trimmed.replaceAll("(?m)^--.*$", "").trim();
-                            if (!trimmed.isEmpty()) {
-                                log.debug("Executing SQL in {}: {}", databaseName, trimmed.substring(0, Math.min(80, trimmed.length())));
-                                stmt.execute(trimmed);
-                            }
-                        }
-                    }
                 }
+                for (String script : TENANT_SQL_SCRIPTS) {
+                    ScriptUtils.executeSqlScript(conn, new ClassPathResource(script));
+                }
+                SchemaMigrationHelper.runTenantMigrations(conn);
             }
-            log.info("Schema initialized for: {}", databaseName);
+            log.info("Tenant schema up to date: {}", databaseName);
         } catch (Exception e) {
-            log.error("Schema initialization failed for database: {}", databaseName, e);
-            throw new RuntimeException("Failed to initialize tenant schema: " + e.getMessage(), e);
+            log.error("Schema migration failed for database: {}", databaseName, e);
+            throw new RuntimeException("Failed to migrate tenant schema: " + e.getMessage(), e);
         }
     }
 
-    private String loadSchemaSql() throws Exception {
-        var resource = new ClassPathResource("db/migration/V1__initial_tenant_schema.sql");
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(resource.getInputStream()))) {
-            return reader.lines().collect(Collectors.joining("\n"));
+    private void runMasterMigrations() {
+        try (Connection conn = masterDataSource.getConnection()) {
+            conn.setAutoCommit(true);
+            SchemaMigrationHelper.runMasterMigrations(conn);
+            log.info("Master schema migrations applied");
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to apply master schema migrations: " + e.getMessage(), e);
         }
     }
 
@@ -134,7 +150,7 @@ public class TenantManagementService {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS tenant_registry (
                     id BIGSERIAL PRIMARY KEY,
-                    agent_id BIGINT UNIQUE NOT NULL,
+                    admin_user_id BIGINT UNIQUE NOT NULL,
                     database_name VARCHAR(255) UNIQUE NOT NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT NOW()
                 )
@@ -143,16 +159,18 @@ public class TenantManagementService {
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id BIGSERIAL PRIMARY KEY,
-                    telegram_id BIGINT UNIQUE NOT NULL,
+                    telegramid BIGINT UNIQUE NOT NULL,
                     username VARCHAR(100),
                     first_name VARCHAR(100),
                     last_name VARCHAR(100),
                     role VARCHAR(20) NOT NULL,
-                    agent_id BIGINT,
+                    admin_user_id BIGINT,
                     parent_id BIGINT,
+                    business_name VARCHAR(255),
+                    admin_approved BOOLEAN NOT NULL DEFAULT FALSE,
                     balance DECIMAL(19,2) DEFAULT 0,
                     frozen_balance DECIMAL(19,2) DEFAULT 0,
-                    active BOOLEAN DEFAULT TRUE,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
                     created_at TIMESTAMP NOT NULL DEFAULT NOW()
                 )
             """);
@@ -169,20 +187,9 @@ public class TenantManagementService {
             """);
 
             stmt.execute("""
-                CREATE TABLE IF NOT EXISTS agents (
+                CREATE TABLE IF NOT EXISTS admin_fund_requests (
                     id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT UNIQUE NOT NULL,
-                    business_name VARCHAR(255),
-                    approved BOOLEAN DEFAULT FALSE,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-                )
-            """);
-
-            stmt.execute("""
-                CREATE TABLE IF NOT EXISTS agent_fund_requests (
-                    id BIGSERIAL PRIMARY KEY,
-                    agent_id BIGINT NOT NULL,
+                    admin_user_id BIGINT NOT NULL,
                     amount DECIMAL(19,2) NOT NULL,
                     screenshot_url VARCHAR(500),
                     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
@@ -195,7 +202,7 @@ public class TenantManagementService {
 
             log.info("Master schema ensured");
         } catch (Exception e) {
-            throw new RuntimeException("Failed to ensure master schema", e);
+            throw new RuntimeException("Failed to ensure master schema: " + e.getMessage(), e);
         }
     }
 }

@@ -2,6 +2,8 @@ package com.bingo.app.master.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.infrastructure.persistence.TenantManagementService;
+import com.bingo.app.master.dto.request.CreateAdminRequest;
+import com.bingo.app.master.dto.request.CreatePlayerRequest;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.UserRepository;
@@ -22,7 +24,6 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final TenantManagementService tenantManagementService;
-    private final AgentService agentService;
     private final PlayerService playerService;
 
     @Value("${app.super-admin.telegram-id}")
@@ -66,47 +67,52 @@ public class UserService {
     }
 
     // NOT @Transactional — createTenant() runs CREATE DATABASE which cannot be in a transaction.
-    // userRepository.save() handles its own implicit transaction.
-    public User createAgent(Long creatorId, Long telegramId, String username, String firstName, String lastName) {
-        User agent = User.builder()
-                .telegramId(telegramId)
-                .username(username)
-                .firstName(firstName)
-                .lastName(lastName)
+    public User createAdmin(CreateAdminRequest request) {
+        User admin = User.builder()
+                .telegramId(request.telegramId())
+                .username(request.username())
+                .firstName(request.firstName())
+                .lastName(request.lastName())
                 .role(Role.ADMIN)
-                .parentId(creatorId)
+                .parentId(request.creatorId())
+                .adminApproved(false)
                 .active(true)
                 .build();
 
-        User saved = userRepository.save(agent);
-
-        // Create tenant database for this agent
+        User saved = userRepository.save(admin);
         tenantManagementService.createTenant(saved.getId());
-
-        // Register agent record
-        agentService.registerAgent(saved.getId(), null);
-
         return saved;
     }
 
-    public User createPlayer(Long agentId, Long telegramId, String username, String firstName, String lastName, Long parentId) {
+    @Transactional
+    public User approveAdmin(Long adminUserId) {
+        User admin = userRepository.findById(adminUserId)
+                .orElseThrow(() -> new RuntimeException("Admin not found: " + adminUserId));
+        if (admin.getRole() != Role.ADMIN) {
+            throw new RuntimeException("User is not an admin: " + adminUserId);
+        }
+        admin.setAdminApproved(true);
+        return userRepository.save(admin);
+    }
+
+    public User createPlayer(CreatePlayerRequest request) {
         User player = User.builder()
-                .telegramId(telegramId)
-                .username(username)
-                .firstName(firstName)
-                .lastName(lastName)
+                .telegramId(request.telegramId())
+                .username(request.username())
+                .firstName(request.firstName())
+                .lastName(request.lastName())
                 .role(Role.PLAYER)
-                .agentId(agentId)
-                .parentId(parentId)
+                .adminUserId(request.adminUserId())
+                .parentId(request.parentId())
                 .active(true)
                 .build();
 
         User saved = userRepository.save(player);
 
-        String tenant = TenantContext.getAgentTenant(agentId);
+        String tenant = TenantContext.tenantKeyForAdmin(request.adminUserId());
         TenantContext.setTenant(tenant);
         try {
-            playerService.createPlayer(saved.getId(), agentId, parentId);
+            playerService.createPlayer(saved.getId(), request.adminUserId(), request.parentId());
             log.info("Player record created in tenant DB for user: {}", saved.getId());
         } finally {
             TenantContext.clear();
@@ -121,8 +127,8 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<User> getPlayersByAgent(Long agentId) {
-        return userRepository.findAllByAgentId(agentId);
+    public List<User> getPlayersByAdmin(Long adminUserId) {
+        return userRepository.findAllByAdminUserId(adminUserId);
     }
 
     @Transactional(readOnly = true)
@@ -148,5 +154,4 @@ public class UserService {
     public List<User> findAllByParentIdAndRole(Long parentId, Role role) {
         return userRepository.findAllByParentIdAndRole(parentId, role);
     }
-
 }

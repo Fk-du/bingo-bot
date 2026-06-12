@@ -37,75 +37,20 @@ public class MenuService {
         List<List<InlineKeyboardButton>> keyboard = new ArrayList<>();
 
         switch (user.getRole()) {
-            case PLAYER:
-                message.setText("🎮 **Player Menu**\n\nSelect an option:");
-                keyboard.add(createRow(
-                        createButton("💰 Balance", BotConstants.BALANCE),
-                        createButton("🎯 Game Status", BotConstants.GAME_STATUS)
-                ));
-                keyboard.add(createRow(
-                        createButton("🎲 Join Game", BotConstants.JOIN_GAME),
-                        createButton("🃏 My Cards", BotConstants.MY_CARDS)
-                ));
-                keyboard.add(createRow(
-                        createButton("📜 History", BotConstants.MY_HISTORY),
-                        createButton("💎 Buy Points", BotConstants.BUY_POINTS)
-                ));
-                keyboard.add(createRow(
-                        createButton("📤 Withdraw", BotConstants.WITHDRAW_REQUEST)
-                ));
-                keyboard.add(createRow(
-                        createWebAppButton("🚀 Launch App")
-                ));
-                break;
-
-            case ADMIN:
-                message.setText("🎯 **Agent Dashboard**\n\nManage your games and players:");
-                keyboard.add(createRow(
-                        createButton("🎮 Create Game", BotConstants.CREATE_GAME),
-                        createButton("▶️ Start Game", BotConstants.START_GAME)
-                ));
-                keyboard.add(createRow(
-                        createButton("❌ Cancel Game", BotConstants.CANCEL_GAME),
-                        createButton("🔔 Pending Claims", BotConstants.PENDING_CLAIMS)
-                ));
-                keyboard.add(createRow(
-                        createButton("🔗 Invite Link", BotConstants.INVITE_LINK),
-                        createButton("👥 My Players", BotConstants.MY_PLAYERS)
-                ));
-                keyboard.add(createRow(
-                        createButton("💰 Fund Player", BotConstants.FUND_PLAYER),
-                        createButton("📤 Withdrawals", BotConstants.WITHDRAW_REQUESTS)
-                ));
-                keyboard.add(createRow(
-                        createButton("📊 Stats", BotConstants.ADMIN_STATS)
-                ));
-                keyboard.add(createRow(
-                        createWebAppButton("🚀 Launch App")
-                ));
-                break;
-
-            case SUPER_ADMIN:
-                message.setText("👑 **Super Admin Panel**\n\nPlatform management:");
-                keyboard.add(createRow(
-                        createButton("🚀 Create Agent", BotConstants.CREATE_AGENT),
-                        createButton("💰 Fund Agent", BotConstants.FUND_AGENT)
-                ));
-                keyboard.add(createRow(
-                        createButton("📈 Reports", BotConstants.VIEW_REPORTS),
-                        createButton("🎯 Active Games", BotConstants.ACTIVE_GAMES)
-                ));
-                keyboard.add(createRow(
-                        createButton("🏢 All Agents", BotConstants.ALL_AGENTS),
-                        createButton("💳 Transactions", BotConstants.TRANSACTIONS)
-                ));
-                keyboard.add(createRow(
-                        createButton("⚙️ Settings", BotConstants.SYSTEM_SETTINGS)
-                ));
-                keyboard.add(createRow(
-                        createWebAppButton("🚀 Launch App")
-                ));
-                break;
+            case PLAYER -> {
+                message.setText("🎮 Welcome to BingoPlus!\n\nUse the Launch App button to access the game.");
+                keyboard.add(createRow(createWebAppButton("🚀 Launch App")));
+            }
+            case ADMIN -> {
+                message.setText("🎯 Admin Dashboard\n\nManage your games in the app or generate an invite link for players.");
+                keyboard.add(createRow(createButton("🔗 Invite Link", BotConstants.INVITE_LINK)));
+                keyboard.add(createRow(createWebAppButton("🚀 Launch App")));
+            }
+            case SUPER_ADMIN -> {
+                message.setText("👑 Super Admin Panel\n\nManage your platform in the app or generate an admin invite link.");
+                keyboard.add(createRow(createButton("🚀 Create Admin", BotConstants.CREATE_ADMIN)));
+                keyboard.add(createRow(createWebAppButton("🚀 Launch App")));
+            }
         }
 
         markup.setKeyboard(keyboard);

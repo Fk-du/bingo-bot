@@ -1,5 +1,6 @@
 package com.bingo.app.tenant.controller;
 
+import com.bingo.app.common.util.AdminIds;
 import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.CreateGameRequest;
 import com.bingo.app.common.dto.ApiResponse;
@@ -101,8 +102,9 @@ public class GameController {
                 return ApiResponse.ok(game.map(g -> List.of(tenantMapper.toDto(g))).orElse(List.of()));
             }
             case PLAYER -> {
-                if (user.getAgentId() == null) return ApiResponse.ok(List.of());
-                var game = gameService.findCurrentGameForAdmin(user.getAgentId());
+                Long adminUserId = AdminIds.adminUserId(user);
+                if (adminUserId == null) return ApiResponse.ok(List.of());
+                var game = gameService.findCurrentGameForAdmin(adminUserId);
                 return ApiResponse.ok(game.map(g -> List.of(tenantMapper.toDto(g))).orElse(List.of()));
             }
             default -> {

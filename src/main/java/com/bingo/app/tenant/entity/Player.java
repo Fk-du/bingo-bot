@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "players", indexes = {
         @Index(name = "idx_players_user", columnList = "user_id"),
-        @Index(name = "idx_players_agent", columnList = "agent_id"),
+        @Index(name = "idx_players_admin", columnList = "admin_user_id"),
         @Index(name = "idx_players_parent", columnList = "parent_id")
 })
 @Getter
@@ -26,8 +26,8 @@ public class Player {
     @Column(name = "user_id", unique = true, nullable = false)
     private Long userId;
 
-    @Column(name = "agent_id", nullable = false)
-    private Long agentId;
+    @Column(name = "admin_user_id", nullable = false)
+    private Long adminUserId;
 
     @Column(name = "parent_id")
     private Long parentId;

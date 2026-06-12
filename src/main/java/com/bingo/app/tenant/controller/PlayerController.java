@@ -25,7 +25,7 @@ public class PlayerController {
     @GetMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<PlayerResponse>> listPlayers(@AuthenticationPrincipal UserPrincipal principal) {
-        var players = playerService.getPlayersByAgent(principal.getUser().getAgentId())
+        var players = playerService.getPlayersByAdmin(principal.getUser().getId())
                 .stream()
                 .map(tenantMapper::toDto)
                 .toList();

@@ -12,10 +12,15 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
+/**
+ * Master user record for all roles.
+ * For {@link Role#ADMIN}: {@link #adminApproved} and {@link #businessName} hold onboarding metadata
+ * (formerly a separate admin_profiles/agents table).
+ */
 @Entity
 @Table(name = "users", indexes = {
         @Index(name = "idx_users_telegram", columnList = "telegramid"),
-        @Index(name = "idx_users_agent", columnList = "agent_id"),
+        @Index(name = "idx_users_admin", columnList = "admin_user_id"),
         @Index(name = "idx_users_parent", columnList = "parent_id")
 })
 @Getter
@@ -42,10 +47,20 @@ public class User implements UserDetails {
     @Enumerated(EnumType.STRING)
     private Role role;
 
-    @Column(name = "agent_id")
-    private Long agentId;
+    /** Owning admin's {@code users.id} — set for {@link Role#PLAYER} only. */
+    @Column(name = "admin_user_id")
+    private Long adminUserId;
     @Column(name = "parent_id")
     private Long parentId;
+
+    /** Display name for bingo operations — meaningful for {@link Role#ADMIN}. */
+    @Column(name = "business_name")
+    private String businessName;
+
+    /** Super-admin onboarding approval — meaningful for {@link Role#ADMIN}. */
+    @Builder.Default
+    @Column(name = "admin_approved")
+    private boolean adminApproved = false;
 
     @Builder.Default
     @Column(name = "balance")

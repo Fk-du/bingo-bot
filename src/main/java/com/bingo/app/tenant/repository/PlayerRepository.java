@@ -15,11 +15,11 @@ import java.util.Optional;
 public interface PlayerRepository extends JpaRepository<Player, Long> {
 
     Optional<Player> findByUserId(Long userId);
-    List<Player> findByAgentId(Long agentId);
+    List<Player> findByAdminUserId(Long adminUserId);
 
     List<Player> findByParentId(Long parentId);
 
-    long countByAgentId(Long agentId);
+    long countByAdminUserId(Long adminUserId);
 
     long countByParentId(Long parentId);
 

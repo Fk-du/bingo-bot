@@ -4,7 +4,7 @@ import com.bingo.app.master.entity.User;
 import com.bingo.app.master.service.UserService;
 import com.bingo.app.bot.callback.CallbackContext;
 import com.bingo.app.bot.callback.CallbackRouter;
-import com.bingo.app.bot.service.InputStateService;
+import com.bingo.app.bot.service.MenuService;
 import com.bingo.app.infrastructure.persistence.TenantHelper;
 import com.bingo.app.bot.BingoTelegramBot;
 import com.bingo.app.bot.command.StartCommand;
@@ -22,10 +22,7 @@ public class UpdateHandler {
     private final StartCommand startCommand;
     private final CallbackRouter callbackRouter;
     private final UserService userService;
-    private final InputStateService inputStateService;
-    private final PlayerBotHandler playerBotHandler;
-    private final AdminBotHandler adminBotHandler;
-    private final SuperAdminBotHandler superAdminBotHandler;
+    private final MenuService menuService;
 
     public void handle(Update update, BingoTelegramBot bot) {
         if (update == null) {
@@ -53,7 +50,6 @@ public class UpdateHandler {
 
         log.debug("Callback query received: data={}, telegramId={}", data, telegramId);
 
-        // Find user - returns User or null
         User user = userService.findByTelegramId(telegramId);
         if (user == null) {
             log.warn("User not found for telegramId: {}", telegramId);
@@ -61,7 +57,6 @@ public class UpdateHandler {
             return;
         }
 
-        // Build callback context
         CallbackContext ctx = CallbackContext.builder()
                 .bot(bot)
                 .chatId(chatId)
@@ -70,7 +65,6 @@ public class UpdateHandler {
                 .data(data)
                 .build();
 
-        // Route to appropriate handler based on user role
         TenantHelper.runWithTenant(user, () -> callbackRouter.route(ctx));
     }
 
@@ -87,57 +81,8 @@ public class UpdateHandler {
             return;
         }
 
-        // Check for pending input state (e.g., waiting for amount entry)
-        InputStateService.PendingInput pending = inputStateService.getPendingInput(telegramId);
-        if (pending != null) {
-            handlePendingInput(update, bot, pending);
-            return;
-        }
-
-        // Default: unknown command
-        sendMessage(bot, chatId, "Unknown command. Please use the menu buttons or /start.");
-    }
-
-    private void handlePendingInput(Update update, BingoTelegramBot bot, InputStateService.PendingInput pending) {
-        String text = update.getMessage().getText();
-        Long telegramId = update.getMessage().getFrom().getId();
-        Long chatId = update.getMessage().getChatId();
-
-        // Clear pending action first
-        inputStateService.clearPendingAction(telegramId);
-
-        // Find user - returns User or null
-        User user = userService.findByTelegramId(telegramId);
-        if (user == null) {
-            sendMessage(bot, chatId, "User not found. Please use /start.");
-            return;
-        }
-
-        // Build context
-        CallbackContext ctx = CallbackContext.builder()
-                .bot(bot)
-                .chatId(chatId)
-                .telegramId(telegramId)
-                .user(user)
-                .data(text)  // Use the text input as data
-                .build();
-
-        // Route to appropriate handler based on role and pending action
-        TenantHelper.runWithTenant(user, () -> {
-            switch (user.getRole()) {
-                case PLAYER:
-                    playerBotHandler.handlePendingInput(ctx, pending);
-                    break;
-                case ADMIN:
-                    adminBotHandler.handlePendingInput(ctx, pending);
-                    break;
-                case SUPER_ADMIN:
-                    superAdminBotHandler.handlePendingInput(ctx, pending);
-                    break;
-                default:
-                    sendMessage(bot, chatId, "Unknown role: " + user.getRole());
-            }
-        });
+        // Default: tell user to use /start or the menu
+        sendMessage(bot, chatId, "Welcome to BingoPlus! Use /start to get started, or open the app using the button below.");
     }
 
     private void sendMessage(BingoTelegramBot bot, Long chatId, String text) {

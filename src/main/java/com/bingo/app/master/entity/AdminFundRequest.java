@@ -8,23 +8,23 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "agent_fund_requests", indexes = {
-        @Index(name = "idx_agent_fund_agent", columnList = "agent_id"),
-        @Index(name = "idx_agent_fund_status", columnList = "status")
+@Table(name = "admin_fund_requests", indexes = {
+        @Index(name = "idx_admin_fund_admin", columnList = "admin_user_id"),
+        @Index(name = "idx_admin_fund_status", columnList = "status")
 })
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class AgentFundRequest {
+public class AdminFundRequest {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "agent_id", nullable = false)
-    private Long agentId;
+    @Column(name = "admin_user_id", nullable = false)
+    private Long adminUserId;
 
     @Column(nullable = false)
     private BigDecimal amount;

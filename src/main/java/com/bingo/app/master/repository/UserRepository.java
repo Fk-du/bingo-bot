@@ -19,7 +19,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     List<User> findAllByRole(Role role);
 
-    List<User> findAllByAgentId(Long agentId);
+    List<User> findAllByAdminUserId(Long adminUserId);
 
     List<User> findAllByParentIdAndRole(Long parentId, Role role);
 

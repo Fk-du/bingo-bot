@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 public record PlayerResponse(
         Long id,
         Long userId,
-        Long agentId,
+        Long adminUserId,
         Long parentId,
         LocalDateTime createdAt
 ) {}

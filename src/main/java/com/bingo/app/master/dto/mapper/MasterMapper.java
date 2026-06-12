@@ -8,23 +8,46 @@ import org.springframework.stereotype.Component;
 @Component
 public class MasterMapper {
 
-    public AgentResponse toDto(Agent agent) {
-        if (agent == null) return null;
-        return AgentResponse.builder()
-                .id(agent.getId())
-                .userId(agent.getUserId())
-                .businessName(agent.getBusinessName())
-                .approved(agent.isApproved())
-                .active(agent.isActive())
-                .createdAt(agent.getCreatedAt())
+    public UserProfileResponse toUserProfile(User user) {
+        if (user == null) return null;
+        return UserProfileResponse.builder()
+                .id(user.getId())
+                .telegramId(user.getTelegramId())
+                .username(user.getUsername())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .role(user.getRole().name())
+                .adminUserId(user.getAdminUserId())
+                .businessName(user.getBusinessName())
+                .adminApproved(user.isAdminApproved())
+                .parentId(user.getParentId())
+                .balance(user.getBalance())
+                .frozenBalance(user.getFrozenBalance())
+                .active(user.isActive())
                 .build();
     }
 
-    public AgentFundRequestResponse toDto(AgentFundRequest request) {
+    public AdminListItem toAdminListItem(User user) {
+        if (user == null) return null;
+        return AdminListItem.builder()
+                .adminUserId(user.getId())
+                .approved(user.isAdminApproved())
+                .businessName(user.getBusinessName())
+                .telegramId(user.getTelegramId())
+                .username(user.getUsername())
+                .firstName(user.getFirstName())
+                .lastName(user.getLastName())
+                .balance(user.getBalance())
+                .frozenBalance(user.getFrozenBalance())
+                .active(user.isActive())
+                .build();
+    }
+
+    public AdminFundRequestResponse toDto(AdminFundRequest request) {
         if (request == null) return null;
-        return AgentFundRequestResponse.builder()
+        return AdminFundRequestResponse.builder()
                 .id(request.getId())
-                .agentId(request.getAgentId())
+                .adminUserId(request.getAdminUserId())
                 .amount(request.getAmount())
                 .screenshotUrl(request.getScreenshotUrl())
                 .status(request.getStatus())
@@ -61,7 +84,7 @@ public class MasterMapper {
         if (registry == null) return null;
         return TenantRegistryResponse.builder()
                 .id(registry.getId())
-                .agentId(registry.getAgentId())
+                .adminUserId(registry.getAdminUserId())
                 .databaseName(registry.getDatabaseName())
                 .createdAt(registry.getCreatedAt())
                 .build();

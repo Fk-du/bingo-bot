@@ -27,7 +27,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/v1/auth/**", "/api/auth/**", "/ws/**", "/health").permitAll()
+                        .requestMatchers("/api/v1/auth/**", "/api/auth/**", "/ws/**", "/health", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/v1/screenshots/upload").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/games/active").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/games/{id}/register").hasRole("PLAYER")

@@ -34,12 +34,12 @@ public class StartCommand {
 
         log.info("Start command from telegramId={}, code={}", telegramId, code);
 
-        // Check if user exists - returns User or null
+        // Check if user exists
         User existingUser = userService.findByTelegramId(telegramId);
 
         if (existingUser != null) {
             TenantHelper.runWithTenant(existingUser, () -> {
-                sendWelcomeBackMessage(bot, chatId, existingUser);
+                sendMessage(bot, chatId, "👋 Welcome back! Use the button below to launch the app.");
                 menuService.showMenu(bot, update, existingUser);
             });
             return;
@@ -49,7 +49,7 @@ public class StartCommand {
         if (telegramId.equals(superAdminTelegramId)) {
             User superAdmin = userService.ensureSuperAdmin(telegramId);
             TenantHelper.runWithTenant(superAdmin, () -> {
-                sendMessage(bot, chatId, "✅ Welcome Super Admin! You have full platform access.");
+                sendMessage(bot, chatId, "✅ Welcome Super Admin! You have full platform access. Use the button below to open the admin panel.");
                 menuService.showMenu(bot, update, superAdmin);
             });
             return;
@@ -57,14 +57,15 @@ public class StartCommand {
 
         // New user with invite code
         if (code == null || code.isBlank()) {
-            sendMessage(bot, chatId, "❌ Invalid invite link. Please use the link provided by your agent.");
+            sendMessage(bot, chatId, "❌ Invalid invite link. Please use the link provided by your admin.");
             return;
         }
 
         try {
             User newUser = inviteService.registerWithInvite(telegramId, code);
             TenantHelper.runWithTenant(newUser, () -> {
-                sendWelcomeMessage(bot, chatId, newUser);
+                String roleText = newUser.getRole() == Role.ADMIN ? "Admin" : "Player";
+                sendMessage(bot, chatId, "🎉 Welcome to BingoPlus! You have been registered as a " + roleText + ". Use the button below to launch the app.");
                 menuService.showMenu(bot, update, newUser);
             });
         } catch (Exception e) {
@@ -76,29 +77,6 @@ public class StartCommand {
     private String extractStartCode(String text) {
         String[] parts = text.trim().split("\\s+", 2);
         return parts.length > 1 ? parts[1].trim() : null;
-    }
-
-    private void sendWelcomeMessage(BingoTelegramBot bot, Long chatId, User user) {
-        String roleText = user.getRole() == Role.ADMIN ? "Agent" : "Player";
-        String message = String.format(
-                "🎉 Welcome to BingoPlus, %s!\n\n" +
-                        "You have been registered as a %s.\n\n" +
-                        "Use the buttons below to get started.",
-                user.getFirstName() != null ? user.getFirstName() : "User",
-                roleText
-        );
-        sendMessage(bot, chatId, message);
-    }
-
-    private void sendWelcomeBackMessage(BingoTelegramBot bot, Long chatId, User user) {
-        String message = String.format(
-                "👋 Welcome back, %s!\n\n" +
-                        "Your balance: 💰 %s\n\n" +
-                        "What would you like to do?",
-                user.getFirstName() != null ? user.getFirstName() : "User",
-                user.getBalance()
-        );
-        sendMessage(bot, chatId, message);
     }
 
     private void sendMessage(BingoTelegramBot bot, Long chatId, String text) {

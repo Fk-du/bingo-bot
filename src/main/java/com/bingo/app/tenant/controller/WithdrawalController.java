@@ -1,6 +1,7 @@
 package com.bingo.app.tenant.controller;
 
 import com.bingo.app.infrastructure.security.UserPrincipal;
+import com.bingo.app.tenant.dto.request.CreateWithdrawalRequest;
 import com.bingo.app.tenant.dto.request.WithdrawalPayRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
@@ -12,9 +13,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/withdrawals")
@@ -28,11 +27,9 @@ public class WithdrawalController {
     @PreAuthorize("hasRole('PLAYER')")
     public ApiResponse<WithdrawalResponse> createWithdrawal(
             @AuthenticationPrincipal UserPrincipal principal,
-            @RequestBody Map<String, Object> body) {
-        BigDecimal amount = new BigDecimal(body.getOrDefault("amount", "0").toString());
-        String payoutDetails = (String) body.getOrDefault("payoutDetails", "");
+            @Valid @RequestBody CreateWithdrawalRequest request) {
         var withdrawal = walletService.createWithdrawRequest(
-                principal.getUser().getId(), amount, payoutDetails);
+                principal.getUser().getId(), request.amount(), request.payoutDetails());
         return ApiResponse.ok("Withdrawal request created", tenantMapper.toDto(withdrawal));
     }
 

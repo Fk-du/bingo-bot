@@ -15,33 +15,25 @@ import java.util.Optional;
 @Repository
 public interface GameRepository extends JpaRepository<Game, Long> {
 
-    // Find by agent and status
-    Optional<Game> findByAgentIdAndStatus(Long agentId, GameStatus status);
+    Optional<Game> findByAdminUserIdAndStatus(Long adminUserId, GameStatus status);
 
-    // Find by agent and multiple statuses
-    @Query("SELECT g FROM Game g WHERE g.agentId = :agentId AND g.status IN :statuses")
-    Optional<Game> findByAgentIdAndStatusIn(@Param("agentId") Long agentId, @Param("statuses") List<GameStatus> statuses);
+    @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN :statuses")
+    Optional<Game> findByAdminUserIdAndStatusIn(@Param("adminUserId") Long adminUserId, @Param("statuses") List<GameStatus> statuses);
 
-    // Find all games for agent ordered by creation date
-    List<Game> findAllByAgentIdOrderByCreatedAtDesc(Long agentId);
+    List<Game> findAllByAdminUserIdOrderByCreatedAtDesc(Long adminUserId);
 
-    // Find all games ordered by creation date
     List<Game> findAllByOrderByCreatedAtDesc();
 
-    // Count active games for agent
-    @Query("SELECT COUNT(g) FROM Game g WHERE g.agentId = :agentId AND g.status IN :statuses")
-    long countByAgentIdAndStatusIn(@Param("agentId") Long agentId, @Param("statuses") List<GameStatus> statuses);
+    @Query("SELECT COUNT(g) FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN :statuses")
+    long countByAdminUserIdAndStatusIn(@Param("adminUserId") Long adminUserId, @Param("statuses") List<GameStatus> statuses);
 
-    // Find by ID with pessimistic lock for update
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT g FROM Game g WHERE g.id = :id")
     Optional<Game> findByIdForUpdate(@Param("id") Long id);
 
-    // Find active game for agent (any status except ENDED)
-    @Query("SELECT g FROM Game g WHERE g.agentId = :agentId AND g.status != 'ENDED' ORDER BY g.createdAt DESC")
-    Optional<Game> findActiveGameByAgent(@Param("agentId") Long agentId);
+    @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status != 'ENDED' ORDER BY g.createdAt DESC")
+    Optional<Game> findActiveGameByAdmin(@Param("adminUserId") Long adminUserId);
 
-    // Check if agent has any active game
-    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.agentId = :agentId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'CLAIM_PENDING')")
-    boolean hasActiveGame(@Param("agentId") Long agentId);
+    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'CLAIM_PENDING')")
+    boolean hasActiveGame(@Param("adminUserId") Long adminUserId);
 }

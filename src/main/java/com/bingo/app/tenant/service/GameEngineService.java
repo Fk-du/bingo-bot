@@ -346,7 +346,7 @@ public class GameEngineService {
         walletService.creditWinnings(winnerId, winnerAmount, gameId);
 
         // Deduct platform fee from agent
-        walletService.deductPlatformFee(game.getAgentId(), platformFee, gameId);
+        walletService.deductPlatformFee(game.getAdminUserId(), platformFee, gameId);
 
         // Update approved claim
         claim.setRewardAmount(winnerAmount);

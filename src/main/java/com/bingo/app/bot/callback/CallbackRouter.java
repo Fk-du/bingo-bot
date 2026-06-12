@@ -24,31 +24,10 @@ public class CallbackRouter {
         log.debug("Routing callback '{}' for role {}", data, role);
 
         switch (role) {
-            case PLAYER:
-                playerBotHandler.handle(ctx);
-                break;
-            case ADMIN:
-                adminBotHandler.handle(ctx);
-                break;
-            case SUPER_ADMIN:
-                superAdminBotHandler.handle(ctx);
-                break;
-            default:
-                log.warn("Unknown role: {}", role);
-                sendMessage(ctx, "Unknown role. Please contact support.");
-        }
-    }
-
-    private void sendMessage(CallbackContext ctx, String text) {
-        try {
-            org.telegram.telegrambots.meta.api.methods.send.SendMessage message =
-                    org.telegram.telegrambots.meta.api.methods.send.SendMessage.builder()
-                            .chatId(ctx.getChatId().toString())
-                            .text(text)
-                            .build();
-            ctx.getBot().execute(message);
-        } catch (Exception e) {
-            log.error("Failed to send message: {}", e.getMessage());
+            case PLAYER -> playerBotHandler.handle(ctx);
+            case ADMIN -> adminBotHandler.handle(ctx);
+            case SUPER_ADMIN -> superAdminBotHandler.handle(ctx);
+            default -> log.warn("Unknown role: {}", role);
         }
     }
 }
