@@ -5,6 +5,7 @@ import com.bingo.app.tenant.dto.request.PlayerStatusRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.PlayerResponse;
+import com.bingo.app.tenant.entity.Player;
 import com.bingo.app.tenant.service.PlayerService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,13 @@ public class PlayerController {
                 .map(tenantMapper::toDto)
                 .toList();
         return ApiResponse.ok(players);
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<PlayerResponse> getPlayer(@PathVariable Long id) {
+        Player player = playerService.findByUserId(id);
+        return ApiResponse.ok(tenantMapper.toDto(player));
     }
 
 //    @PatchMapping("/{id}/status")

@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface PlayerRepository extends JpaRepository<Player, Long> {
 
     Optional<Player> findByUserId(Long userId);
+
     List<Player> findByAdminUserId(Long adminUserId);
 
     List<Player> findByParentId(Long parentId);

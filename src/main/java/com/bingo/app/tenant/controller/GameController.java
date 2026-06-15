@@ -85,7 +85,7 @@ public class GameController {
     }
 
     @PostMapping("/{id}/end")
-    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN')")
     public ApiResponse<String> endGame(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) {

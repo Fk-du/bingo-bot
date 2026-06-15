@@ -26,6 +26,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class GameEngineService {
 
     private final GameRepository gameRepository;
@@ -47,25 +48,6 @@ public class GameEngineService {
     private final ScheduledThreadPoolExecutor taskScheduler = new ScheduledThreadPoolExecutor(4);
     private final Map<Long, ScheduledFuture<?>> activeGameTasks = new ConcurrentHashMap<>();
     private final Map<Long, String> gameTenantContexts = new ConcurrentHashMap<>();
-
-    public GameEngineService(GameRepository gameRepository,
-                              CalledNumberRepository calledNumberRepository,
-                              GameCardRepository gameCardRepository,
-                              BingoClaimRepository bingoClaimRepository,
-                              WalletService walletService,
-                              CardService cardService,
-                              ObjectMapper objectMapper,
-                              PlatformTransactionManager tenantTransactionManager) {
-        this.gameRepository = gameRepository;
-        this.calledNumberRepository = calledNumberRepository;
-        this.gameCardRepository = gameCardRepository;
-        this.bingoClaimRepository = bingoClaimRepository;
-        this.walletService = walletService;
-        this.cardService = cardService;
-        this.objectMapper = objectMapper;
-        this.transactionTemplate = new TransactionTemplate(tenantTransactionManager);
-        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-    }
 
     // Bingo patterns
     private static final List<int[]> WINNING_PATTERNS = List.of(

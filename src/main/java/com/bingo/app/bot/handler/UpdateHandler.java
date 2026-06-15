@@ -22,7 +22,6 @@ public class UpdateHandler {
     private final StartCommand startCommand;
     private final CallbackRouter callbackRouter;
     private final UserService userService;
-    private final MenuService menuService;
 
     public void handle(Update update, BingoTelegramBot bot) {
         if (update == null) {
