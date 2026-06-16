@@ -95,6 +95,17 @@ public class UserService {
         return userRepository.save(admin);
     }
 
+    @Transactional
+    public User rejectAdmin(Long adminUserId) {
+        User admin = userRepository.findById(adminUserId)
+                .orElseThrow(() -> new RuntimeException("Admin not found: " + adminUserId));
+        if (admin.getRole() != Role.ADMIN) {
+            throw new RuntimeException("User is not an admin: " + adminUserId);
+        }
+        admin.setActive(false);
+        return userRepository.save(admin);
+    }
+
     public User createPlayer(CreatePlayerRequest request) {
         User player = User.builder()
                 .telegramId(request.telegramId())

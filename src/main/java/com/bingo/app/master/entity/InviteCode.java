@@ -22,9 +22,6 @@ public class InviteCode {
     @Column(name = "code", unique = true, nullable = false)
     private String code;
 
-    @Column(name = "adminid", nullable = false)
-    private Long adminId;
-
     @Column(name = "creator_id")
     private Long creatorId;
 

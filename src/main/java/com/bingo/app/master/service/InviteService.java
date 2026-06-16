@@ -53,7 +53,6 @@ public class InviteService {
 
         InviteCode inviteCode = InviteCode.builder()
                 .code(code)
-                .adminId(creatorId)
                 .creatorId(creatorId)
                 .role(targetRole)
                 .active(true)

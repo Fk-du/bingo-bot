@@ -2,6 +2,8 @@ package com.bingo.app.master.controller;
 
 import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.common.dto.ApiResponse;
+import com.bingo.app.master.enums.Role;
+import com.bingo.app.master.repository.UserRepository;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.service.GameService;
@@ -23,15 +25,20 @@ public class ReportController {
 
     private final GameService gameService;
     private final WalletService walletService;
+    private final UserRepository userRepository;
     private final TenantMapper tenantMapper;
 
     @GetMapping("/revenue")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ApiResponse<Map<String, Object>> revenue(@AuthenticationPrincipal UserPrincipal principal) {
         var user = principal.getUser();
+        var totalPlayers = principal.getUser().getRole() == Role.SUPER_ADMIN
+                ? userRepository.countByRole(Role.PLAYER)
+                : 0L;
         var report = Map.<String, Object>of(
                 "totalGames", gameService.findAllGames().size(),
                 "totalTransactions", walletService.getAllTransactions().size(),
+                "totalPlayers", totalPlayers,
                 "balance", user.getBalance()
         );
         return ApiResponse.ok(report);

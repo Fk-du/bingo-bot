@@ -54,6 +54,7 @@ public class AdminController {
             @Valid @RequestBody AdminStatusRequest request) {
         var admin = switch (request.status().toUpperCase()) {
             case "APPROVE" -> userService.approveAdmin(adminUserId);
+            case "REJECT" -> userService.rejectAdmin(adminUserId);
             default -> throw new IllegalArgumentException("Unknown status: " + request.status());
         };
         return ApiResponse.ok("Admin status updated", masterMapper.toAdminListItem(admin));
