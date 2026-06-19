@@ -6,9 +6,11 @@ import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.repository.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -37,6 +39,7 @@ public class GameEngineService {
     private final CardService cardService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @Value("${bingo.fees.platform-fee-rate:0.10}")
     private BigDecimal platformFeeRate;
@@ -102,6 +105,8 @@ public class GameEngineService {
 
         activeGameTasks.put(gameId, future);
 
+        publishGameStatusEvent(gameId, GameStatus.IN_PROGRESS);
+
         log.info("Started automatic number calling for game {} every {} seconds", gameId, interval);
     }
 
@@ -159,6 +164,9 @@ public class GameEngineService {
         nextNumber.setCalledAt(LocalDateTime.now());
         calledNumberRepository.save(nextNumber);
         gameRepository.save(game);
+
+        // Publish WebSocket events
+        publishNumberCalledEvent(gameId, nextNumber);
 
         log.info("Game {}: Called number {} (sequence {})", gameId, nextNumber.getNumber(), currentIndex);
 
@@ -258,6 +266,7 @@ public class GameEngineService {
             stopCalling(gameId);
             game.setStatus(GameStatus.CLAIM_PENDING);
             gameRepository.save(game);
+            publishGameStatusEvent(gameId, GameStatus.CLAIM_PENDING);
         }
 
         BingoClaim claim = BingoClaim.builder()
@@ -270,6 +279,8 @@ public class GameEngineService {
                 .claimedAt(LocalDateTime.now())
                 .build();
         bingoClaimRepository.save(claim);
+
+        publishClaimPendingEvent(gameId, claim);
 
         log.info("Game {}: Bingo claimed by player {} (claimId={}), first={}",
                 gameId, playerId, claim.getId(), firstClaim);
@@ -363,7 +374,11 @@ public class GameEngineService {
             }
             gameEnded = true;
 
+            publishGameStatusEvent(gameId, GameStatus.ENDED);
+
             log.info("Game {}: Max winners ({}) reached. Game ended.", gameId, MAX_WINNERS);
+        } else {
+            publishClaimResolvedEvent(gameId, GameStatus.CLAIM_PENDING);
         }
 
         log.info("Game {}: Admin {} approved claim {}. Winner: {} (winner #{}/{}), Prize: {}",
@@ -417,7 +432,10 @@ public class GameEngineService {
             game.setStatus(GameStatus.IN_PROGRESS);
             gameRepository.save(game);
             startCalling(gameId);
+            publishClaimResolvedEvent(gameId, GameStatus.IN_PROGRESS);
             log.info("Game {}: All claims resolved, game resumed.", gameId);
+        } else {
+            publishClaimResolvedEvent(gameId, GameStatus.CLAIM_PENDING);
         }
 
         log.info("Game {}: Admin {} rejected claim {}. Reason: {}.",
@@ -437,6 +455,8 @@ public class GameEngineService {
         game.setStatus(GameStatus.ENDED);
         game.setEndTime(LocalDateTime.now());
         gameRepository.save(game);
+
+        publishGameStatusEvent(gameId, GameStatus.ENDED);
 
         // Refund all players? (Optional - depends on business rules)
         // For now, no refunds
@@ -522,6 +542,34 @@ public class GameEngineService {
     }
 
     /**
+     * Get admin game state (game metadata + called numbers + player count)
+     */
+    @Transactional(readOnly = true)
+    public AdminGameState getAdminGameState(Long gameId) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+
+        List<Integer> calledNumbers = calledNumberRepository
+                .findCalledNumbersByGameId(gameId);
+
+        int playerCount = gameCardRepository.countByGameId(gameId);
+
+        return AdminGameState.builder()
+                .game(game)
+                .calledNumbers(calledNumbers)
+                .playerCount(playerCount)
+                .build();
+    }
+
+    @lombok.Builder
+    @lombok.Data
+    public static class AdminGameState {
+        private Game game;
+        private List<Integer> calledNumbers;
+        private int playerCount;
+    }
+
+    /**
      * Get all called numbers for a game
      */
     @Transactional(readOnly = true)
@@ -552,6 +600,8 @@ public class GameEngineService {
         game.setStatus(GameStatus.CLAIM_PENDING);
         gameRepository.save(game);
 
+        publishGameStatusEvent(gameId, GameStatus.CLAIM_PENDING);
+
         log.info("Game {} paused", gameId);
     }
 
@@ -580,12 +630,63 @@ public class GameEngineService {
 
         startCalling(gameId);
 
+        publishGameStatusEvent(gameId, GameStatus.IN_PROGRESS);
+
         log.info("Game {} resumed", gameId);
     }
 
     private static final int MAX_WINNERS = 3;
 
-    // Inner classes
+    // WebSocket event publishers
+    private void publishEvent(Long gameId, String type, ObjectNode data) {
+        try {
+            ObjectNode event = objectMapper.createObjectNode();
+            event.put("type", type);
+            event.set("data", data);
+            String payload = objectMapper.writeValueAsString(event);
+            messagingTemplate.convertAndSend("/topic/game/" + gameId, payload);
+        } catch (Exception e) {
+            log.error("Failed to publish WebSocket event for game {}: {}", gameId, e.getMessage());
+        }
+    }
+
+    private void publishNumberCalledEvent(Long gameId, CalledNumber calledNumber) {
+        ObjectNode data = objectMapper.createObjectNode();
+        data.put("id", calledNumber.getId());
+        data.put("gameId", calledNumber.getGameId());
+        data.put("number", calledNumber.getNumber());
+        data.put("sequenceIndex", calledNumber.getSequenceIndex());
+        publishEvent(gameId, "NUMBER_CALLED", data);
+    }
+
+    private void publishGameStatusEvent(Long gameId, GameStatus status) {
+        ObjectNode data = objectMapper.createObjectNode();
+        data.put("status", status.name());
+        publishEvent(gameId, "GAME_STATUS_CHANGED", data);
+    }
+
+    private void publishClaimPendingEvent(Long gameId, BingoClaim claim) {
+        try {
+            ObjectNode data = objectMapper.createObjectNode();
+            data.put("id", claim.getId());
+            data.put("gameId", claim.getGameId());
+            data.put("playerId", claim.getPlayerId());
+            data.put("cardId", claim.getCardId());
+            data.put("cardSnapshot", claim.getCardSnapshot());
+            data.put("calledNumbersSnapshot", claim.getCalledNumbersSnapshot());
+            data.put("result", claim.getResult());
+            publishEvent(gameId, "CLAIM_PENDING", data);
+        } catch (Exception e) {
+            log.error("Failed to publish CLAIM_PENDING event: {}", e.getMessage());
+        }
+    }
+
+    private void publishClaimResolvedEvent(Long gameId, GameStatus status) {
+        ObjectNode data = objectMapper.createObjectNode();
+        data.put("status", status.name());
+        publishEvent(gameId, "CLAIM_RESOLVED", data);
+    }
+
     @lombok.Builder
     @lombok.Data
     public static class BingoClaimResult {

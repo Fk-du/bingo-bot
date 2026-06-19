@@ -5,11 +5,13 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.CreateGameRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.AdminGameStateResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResultResponse;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.dto.response.GameStateResponse;
 import com.bingo.app.tenant.dto.response.RegisterResponse;
+import com.bingo.app.master.enums.Role;
 import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.service.CardService;
 import com.bingo.app.tenant.service.GameEngineService;
@@ -34,10 +36,15 @@ public class GameController {
     private final TenantMapper tenantMapper;
 
     @GetMapping("/{id}/state")
-    @PreAuthorize("hasRole('PLAYER')")
-    public ApiResponse<GameStateResponse> getGameState(
+    @PreAuthorize("hasAnyRole('PLAYER', 'ADMIN')")
+    public ApiResponse<?> getGameState(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) {
+        var role = principal.getUser().getRole();
+        if (role == Role.ADMIN) {
+            var state = gameEngineService.getAdminGameState(id);
+            return ApiResponse.ok(tenantMapper.toAdminGameStateDto(state));
+        }
         var state = gameEngineService.getGameState(id, principal.getUser().getId());
         return ApiResponse.ok(tenantMapper.toGameStateDto(state));
     }

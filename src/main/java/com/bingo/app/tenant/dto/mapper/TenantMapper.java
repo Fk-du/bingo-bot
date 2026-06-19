@@ -179,6 +179,27 @@ public class TenantMapper {
                 .build();
     }
 
+    public AdminGameStateResponse toAdminGameStateDto(GameEngineService.AdminGameState state) {
+        if (state == null) return null;
+        Game game = state.getGame();
+        return AdminGameStateResponse.builder()
+                .gameId(game.getId())
+                .status(game.getStatus())
+                .entryFee(game.getEntryFee())
+                .maxPlayers(game.getMaxPlayers())
+                .currentCallIndex(game.getCurrentCallIndex())
+                .totalNumbersCalled(game.getTotalNumbersCalled())
+                .prizePool(game.getPrizePool())
+                .winningPattern(game.getWinningPattern())
+                .callInterval(game.getCallInterval())
+                .startTime(game.getStartTime())
+                .endTime(game.getEndTime())
+                .createdAt(game.getCreatedAt())
+                .calledNumbers(state.getCalledNumbers())
+                .playerCount(state.getPlayerCount())
+                .build();
+    }
+
     public WalletResponse toWalletDto(User user) {
         if (user == null) return null;
         return WalletResponse.builder()
