@@ -34,6 +34,9 @@ public class GameCard {
     private boolean winner = false;
 
     @Builder.Default
+    private boolean banned = false;
+
+    @Builder.Default
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 }

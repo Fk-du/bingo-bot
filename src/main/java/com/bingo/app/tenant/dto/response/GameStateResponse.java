@@ -16,5 +16,6 @@ public record GameStateResponse(
         BigDecimal prizePool,
         int[][] playerCard,
         boolean hasPlayerCard,
-        boolean isWinner
+        boolean isWinner,
+        boolean isBanned
 ) {}

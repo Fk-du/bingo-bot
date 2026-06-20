@@ -213,7 +213,8 @@ public class GameEngineService {
     }
 
     /**
-     * Claim Bingo for a player — allows multiple simultaneous claims
+     * Claim Bingo for a player — allows multiple simultaneous claims.
+     * Invalid claims result in an immediate ban from the game (game continues).
      */
     @Transactional
     public BingoClaimResult claimBingo(Long gameId, Long playerId) throws JsonProcessingException {
@@ -231,6 +232,10 @@ public class GameEngineService {
         // Get player's card for this game
         GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
                 .orElseThrow(() -> new RuntimeException("Player not registered for this game"));
+
+        if (gameCard.isBanned()) {
+            throw new RuntimeException("You have been banned from this game for an invalid claim");
+        }
 
         // Get called numbers so far
         List<Integer> calledNumbers = calledNumberRepository
@@ -256,8 +261,15 @@ public class GameEngineService {
                     .claimedAt(LocalDateTime.now())
                     .build());
 
-            log.warn("Invalid Bingo claim from player {} in game {}", playerId, gameId);
-            throw new RuntimeException("Invalid Bingo claim — no matching pattern found");
+            gameCard.setBanned(true);
+            gameCardRepository.save(gameCard);
+
+            log.warn("Player {} banned from game {} — invalid Bingo claim", playerId, gameId);
+
+            return BingoClaimResult.builder()
+                    .valid(false)
+                    .banned(true)
+                    .build();
         }
 
         // Pause on first claim only
@@ -538,6 +550,7 @@ public class GameEngineService {
                 .playerCard(cardNumbers)
                 .hasPlayerCard(gameCard != null)
                 .isWinner(gameCard != null && gameCard.isWinner())
+                .isBanned(gameCard != null && gameCard.isBanned())
                 .build();
     }
 
@@ -698,6 +711,7 @@ public class GameEngineService {
         private BigDecimal rewardAmount;
         private BigDecimal platformFee;
         private BigDecimal agentCommission;
+        private boolean banned;
     }
 
     @lombok.Builder
@@ -712,5 +726,6 @@ public class GameEngineService {
         private int[][] playerCard;
         private boolean hasPlayerCard;
         private boolean isWinner;
+        private boolean isBanned;
     }
 }

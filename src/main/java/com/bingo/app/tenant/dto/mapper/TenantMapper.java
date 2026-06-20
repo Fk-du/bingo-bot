@@ -35,6 +35,8 @@ public class TenantMapper {
                 .userId(player.getUserId())
                 .adminUserId(player.getAdminUserId())
                 .parentId(player.getParentId())
+                .balance(player.getBalance())
+                .frozenBalance(player.getFrozenBalance())
                 .createdAt(player.getCreatedAt())
                 .build();
     }
@@ -176,6 +178,7 @@ public class TenantMapper {
                 .playerCard(state.getPlayerCard())
                 .hasPlayerCard(state.isHasPlayerCard())
                 .isWinner(state.isWinner())
+                .isBanned(state.isBanned())
                 .build();
     }
 

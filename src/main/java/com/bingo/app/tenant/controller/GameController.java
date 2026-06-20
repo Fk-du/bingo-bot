@@ -138,9 +138,14 @@ public class GameController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) throws JsonProcessingException {
         var result = gameEngineService.claimBingo(id, principal.getUser().getId());
-        String message = result.isPendingReview()
-                ? "Bingo claimed! Waiting for admin review."
-                : "Bingo claim processed";
+        String message;
+        if (result.isBanned()) {
+            message = "Invalid Bingo claim — you have been banned from this game";
+        } else if (result.isPendingReview()) {
+            message = "Bingo claimed! Waiting for admin review.";
+        } else {
+            message = "Bingo claim processed";
+        }
         return ApiResponse.ok(message, BingoClaimResultResponse.builder()
                 .valid(result.isValid())
                 .claimId(result.getClaimId())
@@ -148,6 +153,7 @@ public class GameController {
                 .rewardAmount(result.getRewardAmount())
                 .platformFee(result.getPlatformFee())
                 .agentCommission(result.getAgentCommission())
+                .banned(result.isBanned())
                 .build());
     }
 

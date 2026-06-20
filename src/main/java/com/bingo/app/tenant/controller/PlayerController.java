@@ -1,12 +1,14 @@
 package com.bingo.app.tenant.controller;
 
 import com.bingo.app.infrastructure.security.UserPrincipal;
-import com.bingo.app.tenant.dto.request.PlayerStatusRequest;
+import com.bingo.app.tenant.dto.request.FundPlayerRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.PlayerResponse;
+import com.bingo.app.tenant.dto.response.WalletResponse;
 import com.bingo.app.tenant.entity.Player;
 import com.bingo.app.tenant.service.PlayerService;
+import com.bingo.app.tenant.service.WalletService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -21,6 +23,7 @@ import java.util.List;
 public class PlayerController {
 
     private final PlayerService playerService;
+    private final WalletService walletService;
     private final TenantMapper tenantMapper;
 
     @GetMapping
@@ -40,11 +43,23 @@ public class PlayerController {
         return ApiResponse.ok(tenantMapper.toDto(player));
     }
 
-//    @PatchMapping("/{id}/status")
-//    @PreAuthorize("hasRole('ADMIN')")
-//    public ApiResponse<String> updatePlayerStatus(
-//            @PathVariable Long id,
-//            @Valid @RequestBody PlayerStatusRequest request) {
-//        return ApiResponse.ok("Player status update: " + request.status());
-//    }
+    @PostMapping("/{id}/fund")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<String> fundPlayer(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody FundPlayerRequest request) {
+        walletService.fundPlayer(principal.getUser().getId(), id, request.amount());
+        return ApiResponse.ok("Player funded successfully");
+    }
+
+    @GetMapping("/{id}/wallet")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<WalletResponse> getPlayerWallet(@PathVariable Long id) {
+        Player player = playerService.findByUserId(id);
+        return ApiResponse.ok(WalletResponse.builder()
+                .balance(player.getBalance())
+                .frozenBalance(player.getFrozenBalance())
+                .build());
+    }
 }
