@@ -38,6 +38,20 @@ public class StartCommand {
         User existingUser = userService.findByTelegramId(telegramId);
 
         if (existingUser != null) {
+            // PLAYER with an invite code → try to upgrade to ADMIN
+            if (code != null && !code.isBlank() && existingUser.getRole() == Role.PLAYER) {
+                try {
+                    User upgraded = inviteService.registerWithInvite(telegramId, code);
+                    TenantHelper.runWithTenant(upgraded, () -> {
+                        sendMessage(bot, chatId, "🎉 Welcome to BingoPlus! You have been registered as an Admin. Use the button below to launch the app.");
+                        menuService.showMenu(bot, update, upgraded);
+                    });
+                    return;
+                } catch (Exception e) {
+                    log.warn("Invite upgrade failed for telegramId={}, falling back", telegramId, e);
+                }
+            }
+
             TenantHelper.runWithTenant(existingUser, () -> {
                 sendMessage(bot, chatId, "👋 Welcome back! Use the button below to launch the app.");
                 menuService.showMenu(bot, update, existingUser);

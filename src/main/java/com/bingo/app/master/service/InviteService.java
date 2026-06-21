@@ -78,13 +78,29 @@ public class InviteService {
                 .orElseThrow(() -> new RuntimeException("Invalid or expired invite code"));
 
         // Check if user already exists
-        if (userRepository.existsByTelegramId(telegramId)) {
-            throw new RuntimeException("User already registered");
-        }
+        User existingUser = userRepository.findByTelegramId(telegramId).orElse(null);
 
         // Get creator info
         User creator = userRepository.findById(inviteCode.getCreatorId())
                 .orElseThrow(() -> new RuntimeException("Invalid invite code creator"));
+
+        if (existingUser != null) {
+            // Allow upgrading PLAYER to ADMIN if the invite code is for ADMIN
+            if (existingUser.getRole() == Role.PLAYER && inviteCode.getRole() == Role.ADMIN) {
+                existingUser.setRole(Role.ADMIN);
+                existingUser.setParentId(creator.getId());
+                existingUser.setAdminApproved(false);
+                userRepository.save(existingUser);
+                tenantManagementService.createTenant(existingUser.getId());
+                if (inviteCode.getRole() == Role.ADMIN) {
+                    inviteCode.setActive(false);
+                    inviteCodeRepository.save(inviteCode);
+                }
+                log.info("PLAYER upgraded to ADMIN: id={}, telegramId={}", existingUser.getId(), telegramId);
+                return existingUser;
+            }
+            throw new RuntimeException("User already registered");
+        }
 
         // Get Telegram user info (will be updated from Telegram later)
         String username = "user_" + telegramId;
