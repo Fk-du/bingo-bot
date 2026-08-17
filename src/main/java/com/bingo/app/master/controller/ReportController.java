@@ -4,7 +4,6 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.UserRepository;
-import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.service.GameService;
 import com.bingo.app.tenant.service.WalletService;
@@ -26,7 +25,6 @@ public class ReportController {
     private final GameService gameService;
     private final WalletService walletService;
     private final UserRepository userRepository;
-    private final TenantMapper tenantMapper;
 
     @GetMapping("/revenue")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
@@ -52,6 +50,6 @@ public class ReportController {
             case ADMIN -> gameService.getAllGamesForAdmin(user.getId());
             default -> gameService.findAllGames();
         };
-        return ApiResponse.ok(games.stream().map(tenantMapper::toDto).toList());
+        return ApiResponse.ok(games);
     }
 }

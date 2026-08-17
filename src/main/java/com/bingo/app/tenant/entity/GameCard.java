@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @Builder
 public class GameCard {
 
-    @Id
+    @Id  
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 

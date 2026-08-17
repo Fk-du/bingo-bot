@@ -2,7 +2,7 @@ package com.bingo.app.master.controller;
 
 import com.bingo.app.bot.BingoTelegramBot;
 import com.bingo.app.master.dto.request.BroadcastRequest;
-import com.bingo.app.master.entity.User;
+import com.bingo.app.master.dto.response.AdminListItem;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.service.UserService;
 import com.bingo.app.common.dto.ApiResponse;
@@ -32,12 +32,12 @@ public class BroadcastController {
     @PostMapping
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ApiResponse<String> broadcast(@Valid @RequestBody BroadcastRequest request) {
-        List<User> recipients = resolveRecipients(request.target());
+        List<AdminListItem> recipients = resolveRecipients(request.target());
 
         int sent = 0;
         int failed = 0;
 
-        for (User user : recipients) {
+        for (AdminListItem user : recipients) {
             try {
                 bot.execute(SendMessage.builder()
                         .chatId(user.getTelegramId())
@@ -53,12 +53,12 @@ public class BroadcastController {
         return ApiResponse.ok("Broadcast sent to " + sent + " user(s)" + (failed > 0 ? ", " + failed + " failed" : ""));
     }
 
-    private List<User> resolveRecipients(String target) {
+    private List<AdminListItem> resolveRecipients(String target) {
         return switch (target.toLowerCase()) {
             case "agents" -> userService.findAllByRole(Role.ADMIN);
             case "players" -> userService.findAllByRole(Role.PLAYER);
             default -> {
-                List<User> all = new ArrayList<>(userService.findAllByRole(Role.ADMIN));
+                List<AdminListItem> all = new ArrayList<>(userService.findAllByRole(Role.ADMIN));
                 all.addAll(userService.findAllByRole(Role.PLAYER));
                 yield all;
             }

@@ -12,7 +12,6 @@ import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.dto.response.GameStateResponse;
 import com.bingo.app.tenant.dto.response.RegisterResponse;
 import com.bingo.app.master.enums.Role;
-import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.service.CardService;
 import com.bingo.app.tenant.service.GameEngineService;
 import com.bingo.app.tenant.service.GameService;
@@ -55,7 +54,7 @@ public class GameController {
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody CreateGameRequest request) {
         var game = gameService.createGameWithEntryFee(principal.getUser().getId(), request);
-        return ApiResponse.ok("Game created", tenantMapper.toDto(game));
+        return ApiResponse.ok("Game created", game);
     }
 
     @PostMapping("/{id}/start")
@@ -65,7 +64,7 @@ public class GameController {
             @PathVariable Long id) {
         var game = gameService.startGameForAdmin(principal.getUser().getId(), id);
         gameEngineService.startCalling(game.getId());
-        return ApiResponse.ok("Game started", tenantMapper.toDto(game));
+        return ApiResponse.ok("Game started", game);
     }
 
     @PostMapping("/{id}/cancel")
@@ -106,13 +105,13 @@ public class GameController {
         switch (user.getRole()) {
             case ADMIN -> {
                 var game = gameService.findCurrentGameForAdmin(user.getId());
-                return ApiResponse.ok(game.map(g -> List.of(tenantMapper.toDto(g))).orElse(List.of()));
+                return ApiResponse.ok(game.map(List::of).orElse(List.of()));
             }
             case PLAYER -> {
                 Long adminUserId = AdminIds.adminUserId(user);
                 if (adminUserId == null) return ApiResponse.ok(List.of());
                 var game = gameService.findCurrentGameForAdmin(adminUserId);
-                return ApiResponse.ok(game.map(g -> List.of(tenantMapper.toDto(g))).orElse(List.of()));
+                return ApiResponse.ok(game.map(List::of).orElse(List.of()));
             }
             default -> {
                 return ApiResponse.ok(List.of());
@@ -160,9 +159,7 @@ public class GameController {
     @GetMapping("/{id}/claims/pending")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<BingoClaimResponse>> getPendingClaims(@PathVariable Long id) {
-        var claims = gameEngineService.getPendingClaims(id);
-        var dtos = claims.stream().map(tenantMapper::toDto).toList();
-        return ApiResponse.ok(dtos);
+        return ApiResponse.ok(gameEngineService.getPendingClaims(id));
     }
 
     @PostMapping("/{id}/claims/{claimId}/approve")
@@ -203,6 +200,6 @@ public class GameController {
     public ApiResponse<GameResponse> audit(@PathVariable Long id) {
         var game = gameService.getGameById(id)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
-        return ApiResponse.ok(tenantMapper.toDto(game));
+        return ApiResponse.ok(game);
     }
 }

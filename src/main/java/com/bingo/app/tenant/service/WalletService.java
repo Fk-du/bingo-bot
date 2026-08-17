@@ -6,6 +6,10 @@ import com.bingo.app.master.enums.FundStatus;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.AdminFundRequestRepository;
 import com.bingo.app.master.repository.UserRepository;
+import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.CoinRequestResponse;
+import com.bingo.app.tenant.dto.response.TransactionResponse;
+import com.bingo.app.tenant.dto.response.WithdrawalResponse;
 import com.bingo.app.tenant.entity.CoinRequest;
 import com.bingo.app.tenant.entity.Player;
 import com.bingo.app.tenant.entity.Transaction;
@@ -38,13 +42,14 @@ public class WalletService {
     private final CoinRequestRepository coinRequestRepository;
     private final WithdrawalRepository withdrawalRepository;
     private final AdminFundRequestRepository adminFundRequestRepository;
+    private final TenantMapper tenantMapper;
 
     // =========================================================
     // PLAYER METHODS
     // =========================================================
 
     @Transactional
-    public CoinRequest buyPoints(Long playerId, BigDecimal amount, String screenshotUrl) {
+    public CoinRequestResponse buyPoints(Long playerId, BigDecimal amount, String screenshotUrl) {
         playerService.findByUserId(playerId);
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -65,12 +70,13 @@ public class WalletService {
                 TransactionStatus.PENDING, saved.getId(), "Points purchase requested");
 
         log.info("Buy points request created for player {}: amount={}", playerId, amount);
-        return saved;
+        return tenantMapper.toDto(saved);
     }
 
     @Transactional
-    public Withdrawal createWithdrawRequest(Long playerId, BigDecimal amount, String payoutDetails) {
-        Player player = playerService.findByUserId(playerId);
+    public WithdrawalResponse createWithdrawRequest(Long playerId, BigDecimal amount, String payoutDetails) {
+        Player player = playerRepository.findByUserId(playerId)
+                .orElseThrow(() -> new RuntimeException("Player not found"));
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new RuntimeException("Amount must be positive");
@@ -97,12 +103,14 @@ public class WalletService {
                 TransactionStatus.PENDING, saved.getId(), "Withdrawal request created");
 
         log.info("Withdrawal request created for player {}: amount={}", playerId, amount);
-        return saved;
+        return tenantMapper.toDto(saved);
     }
 
     @Transactional(readOnly = true)
-    public List<Transaction> getHistory(Long playerId) {
-        return transactionRepository.findByUserIdOrderByCreatedAtDesc(playerId);
+    public List<TransactionResponse> getHistory(Long playerId) {
+        return transactionRepository.findByUserIdOrderByCreatedAtDesc(playerId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -148,11 +156,13 @@ public class WalletService {
     }
 
     @Transactional(readOnly = true)
-    public List<Withdrawal> getPendingWithdrawsForAdminPlayers(Long adminUserId) {
+    public List<WithdrawalResponse> getPendingWithdrawsForAdminPlayers(Long adminUserId) {
         List<Player> players = playerRepository.findByAdminUserId(adminUserId);
         List<Long> playerIds = players.stream().map(Player::getUserId).toList();
 
-        return withdrawalRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING);
+        return withdrawalRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     @Transactional
@@ -313,16 +323,20 @@ public class WalletService {
     }
 
     @Transactional(readOnly = true)
-    public List<Transaction> getAllTransactions() {
-        return transactionRepository.findAllByOrderByCreatedAtDesc();
+    public List<TransactionResponse> getAllTransactions() {
+        return transactionRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<CoinRequest> getPendingCoinRequestsForAdmin(Long adminUserId) {
+    public List<CoinRequestResponse> getPendingCoinRequestsForAdmin(Long adminUserId) {
         List<Player> players = playerRepository.findByAdminUserId(adminUserId);
         List<Long> playerIds = players.stream().map(Player::getUserId).toList();
 
-        return coinRequestRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING);
+        return coinRequestRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     // =========================================================

@@ -2,8 +2,11 @@ package com.bingo.app.master.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.infrastructure.persistence.TenantManagementService;
+import com.bingo.app.master.dto.mapper.MasterMapper;
 import com.bingo.app.master.dto.request.CreateAdminRequest;
 import com.bingo.app.master.dto.request.CreatePlayerRequest;
+import com.bingo.app.master.dto.response.AdminListItem;
+import com.bingo.app.master.dto.response.UserProfileResponse;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.UserRepository;
@@ -25,6 +28,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final TenantManagementService tenantManagementService;
     private final PlayerService playerService;
+    private final MasterMapper masterMapper;
 
     @Value("${app.super-admin.telegram-id}")
     private Long superAdminTelegramId;
@@ -85,25 +89,25 @@ public class UserService {
     }
 
     @Transactional
-    public User approveAdmin(Long adminUserId) {
+    public AdminListItem approveAdmin(Long adminUserId) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found: " + adminUserId));
         if (admin.getRole() != Role.ADMIN) {
             throw new RuntimeException("User is not an admin: " + adminUserId);
         }
         admin.setAdminApproved(true);
-        return userRepository.save(admin);
+        return masterMapper.toAdminListItem(userRepository.save(admin));
     }
 
     @Transactional
-    public User rejectAdmin(Long adminUserId) {
+    public AdminListItem rejectAdmin(Long adminUserId) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found: " + adminUserId));
         if (admin.getRole() != Role.ADMIN) {
             throw new RuntimeException("User is not an admin: " + adminUserId);
         }
         admin.setActive(false);
-        return userRepository.save(admin);
+        return masterMapper.toAdminListItem(userRepository.save(admin));
     }
 
     public User createPlayer(CreatePlayerRequest request) {
@@ -138,14 +142,17 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<User> getPlayersByAdmin(Long adminUserId) {
-        return userRepository.findAllByAdminUserId(adminUserId);
+    public List<UserProfileResponse> getPlayersByAdmin(Long adminUserId) {
+        return userRepository.findAllByAdminUserId(adminUserId).stream()
+                .map(masterMapper::toUserProfile)
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public User findById(Long id) {
-        return userRepository.findById(id)
+    public UserProfileResponse findById(Long id) {
+        User user = userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found"));
+        return masterMapper.toUserProfile(user);
     }
 
     @Transactional
@@ -157,12 +164,16 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<User> findAllByRole(Role role) {
-        return userRepository.findAllByRole(role);
+    public List<AdminListItem> findAllByRole(Role role) {
+        return userRepository.findAllByRole(role).stream()
+                .map(masterMapper::toAdminListItem)
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<User> findAllByParentIdAndRole(Long parentId, Role role) {
-        return userRepository.findAllByParentIdAndRole(parentId, role);
+    public List<AdminListItem> findAllByParentIdAndRole(Long parentId, Role role) {
+        return userRepository.findAllByParentIdAndRole(parentId, role).stream()
+                .map(masterMapper::toAdminListItem)
+                .toList();
     }
 }

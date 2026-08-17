@@ -1,5 +1,7 @@
 package com.bingo.app.tenant.service;
 
+import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.PlayerResponse;
 import com.bingo.app.tenant.entity.Player;
 import com.bingo.app.tenant.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
@@ -10,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -17,9 +20,10 @@ import java.util.List;
 public class PlayerService {
 
     private final PlayerRepository playerRepository;
+    private final TenantMapper tenantMapper;
 
     @Transactional
-    public Player createPlayer(Long userId, Long adminUserId, Long parentId) {
+    public PlayerResponse createPlayer(Long userId, Long adminUserId, Long parentId) {
         Player player = Player.builder()
                 .userId(userId)
                 .adminUserId(adminUserId)
@@ -28,28 +32,31 @@ public class PlayerService {
                 .frozenBalance(BigDecimal.ZERO)
                 .createdAt(LocalDateTime.now())
                 .build();
-        return playerRepository.save(player);
+        return tenantMapper.toDto(playerRepository.save(player));
     }
 
     @Transactional(readOnly = true)
-    public Player findByUserId(Long userId) {
-        return playerRepository.findByUserId(userId)
-                .orElseThrow(() -> new RuntimeException("Player not found for user: " + userId));
+    public PlayerResponse findByUserId(Long userId) {
+        return tenantMapper.toDto(findPlayerEntityByUserId(userId));
     }
 
     @Transactional(readOnly = true)
-    public Player findByUserIdOrNull(Long userId) {
-        return playerRepository.findByUserId(userId).orElse(null);
+    public Optional<PlayerResponse> findByUserIdOrNull(Long userId) {
+        return Optional.ofNullable(tenantMapper.toDto(findPlayerEntityOrNullByUserId(userId)));
     }
 
     @Transactional(readOnly = true)
-    public List<Player> getPlayersByAdmin(Long adminUserId) {
-        return playerRepository.findByAdminUserId(adminUserId);
+    public List<PlayerResponse> getPlayersByAdmin(Long adminUserId) {
+        return playerRepository.findByAdminUserId(adminUserId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
-    public List<Player> getPlayersByParent(Long parentId) {
-        return playerRepository.findByParentId(parentId);
+    public List<PlayerResponse> getPlayersByParent(Long parentId) {
+        return playerRepository.findByParentId(parentId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -71,7 +78,7 @@ public class PlayerService {
 
     @Transactional(readOnly = true)
     public BigDecimal getBalance(Long userId) {
-        return findByUserId(userId).getBalance();
+        return findPlayerEntityByUserId(userId).getBalance();
     }
 
     @Transactional
@@ -109,5 +116,14 @@ public class PlayerService {
         if (updated == 0) {
             throw new RuntimeException("Insufficient frozen balance");
         }
+    }
+
+    private Player findPlayerEntityByUserId(Long userId) {
+        return playerRepository.findByUserId(userId)
+                .orElseThrow(() -> new RuntimeException("Player not found for user: " + userId));
+    }
+
+    private Player findPlayerEntityOrNullByUserId(Long userId) {
+        return playerRepository.findByUserId(userId).orElse(null);
     }
 }

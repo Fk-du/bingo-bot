@@ -2,8 +2,11 @@ package com.bingo.app.master.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.infrastructure.persistence.TenantManagementService;
+import com.bingo.app.master.dto.mapper.MasterMapper;
 import com.bingo.app.master.dto.request.CreateAdminRequest;
 import com.bingo.app.master.dto.request.CreatePlayerRequest;
+import com.bingo.app.master.dto.response.InviteCodeResponse;
+import com.bingo.app.master.dto.response.InviteCodeStatsResponse;
 import com.bingo.app.master.entity.InviteCode;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
@@ -29,6 +32,7 @@ public class InviteService {
     private final UserService userService;
     private final TenantManagementService tenantManagementService;
     private final CardService cardService;
+    private final MasterMapper masterMapper;
 
     /**
      * Generate an invite link for a user
@@ -168,9 +172,9 @@ public class InviteService {
     /**
      * Validate an invite code
      */
-    public InviteCode validateInviteCode(String code) {
-        return inviteCodeRepository.findByCodeAndActiveTrue(code)
-                .orElseThrow(() -> new RuntimeException("Invalid or expired invite code"));
+    public InviteCodeResponse validateInviteCode(String code) {
+        return masterMapper.toDto(inviteCodeRepository.findByCodeAndActiveTrue(code)
+                .orElseThrow(() -> new RuntimeException("Invalid or expired invite code")));
     }
 
     /**
@@ -196,14 +200,16 @@ public class InviteService {
     /**
      * Get all active invite codes for a creator
      */
-    public List<InviteCode> getActiveInviteCodesForCreator(Long creatorId) {
-        return inviteCodeRepository.findByCreatorIdAndActiveTrue(creatorId);
+    public List<InviteCodeResponse> getActiveInviteCodesForCreator(Long creatorId) {
+        return inviteCodeRepository.findByCreatorIdAndActiveTrue(creatorId).stream()
+                .map(masterMapper::toDto)
+                .toList();
     }
 
     /**
      * Get invite code statistics
      */
-    public InviteCodeStats getInviteCodeStats(Long creatorId) {
+    public InviteCodeStatsResponse getInviteCodeStats(Long creatorId) {
         List<InviteCode> codes = inviteCodeRepository.findByCreatorId(creatorId);
         long totalCodes = codes.size();
         long usedCodes = codes.stream().filter(c -> !c.isActive()).count();
@@ -220,20 +226,11 @@ public class InviteService {
             }
         }
 
-        return InviteCodeStats.builder()
+        return InviteCodeStatsResponse.builder()
                 .totalCodes(totalCodes)
                 .activeCodes(activeCodes)
                 .usedCodes(usedCodes)
                 .totalRegistrations(registrations)
                 .build();
-    }
-
-    @lombok.Builder
-    @lombok.Data
-    public static class InviteCodeStats {
-        private long totalCodes;
-        private long activeCodes;
-        private long usedCodes;
-        private long totalRegistrations;
     }
 }

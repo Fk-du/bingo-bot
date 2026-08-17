@@ -4,7 +4,6 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.request.BuyPointsRequest;
 import com.bingo.app.tenant.dto.request.CoinRequestAction;
 import com.bingo.app.common.dto.ApiResponse;
-import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.CoinRequestResponse;
 import com.bingo.app.tenant.service.WalletService;
 import jakarta.validation.Valid;
@@ -21,14 +20,13 @@ import java.util.List;
 public class CoinController {
 
     private final WalletService walletService;
-    private final TenantMapper tenantMapper;
 
     @PostMapping("/requests")
     public ApiResponse<CoinRequestResponse> createRequest(
             @AuthenticationPrincipal UserPrincipal principal,
             @Valid @RequestBody BuyPointsRequest request) {
         var coinRequest = walletService.buyPoints(principal.getUser().getId(), request.amount(), request.screenshotUrl());
-        return ApiResponse.ok("Coin request created", tenantMapper.toDto(coinRequest));
+        return ApiResponse.ok("Coin request created", coinRequest);
     }
 
     @GetMapping("/requests")
@@ -36,11 +34,7 @@ public class CoinController {
         var user = principal.getUser();
         switch (user.getRole()) {
             case ADMIN -> {
-                var requests = walletService.getPendingCoinRequestsForAdmin(user.getId())
-                        .stream()
-                        .map(tenantMapper::toDto)
-                        .toList();
-                return ApiResponse.ok(requests);
+                return ApiResponse.ok(walletService.getPendingCoinRequestsForAdmin(user.getId()));
             }
             case SUPER_ADMIN -> {
                 return ApiResponse.ok(List.of());

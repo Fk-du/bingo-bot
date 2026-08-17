@@ -1,6 +1,8 @@
 package com.bingo.app.tenant.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
+import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.entity.*;
 import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.repository.*;
@@ -40,6 +42,7 @@ public class GameEngineService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final SimpMessagingTemplate messagingTemplate;
+    private final TenantMapper tenantMapper;
 
     @Value("${bingo.fees.platform-fee-rate:0.10}")
     private BigDecimal platformFeeRate;
@@ -470,9 +473,6 @@ public class GameEngineService {
 
         publishGameStatusEvent(gameId, GameStatus.ENDED);
 
-        // Refund all players? (Optional - depends on business rules)
-        // For now, no refunds
-
         log.info("Game {} ended without winner. Reason: {}", gameId, reason);
     }
 
@@ -480,13 +480,9 @@ public class GameEngineService {
      * Validate Bingo claim
      */
     private boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
-        // Create a set of called numbers for O(1) lookup
         Set<Integer> calledSet = new HashSet<>(calledNumbers);
-
-        // Mark free space as always called
         calledSet.add(0);
 
-        // Check all winning patterns
         for (int[] winPattern : WINNING_PATTERNS) {
             boolean patternComplete = true;
             for (int i = 0; i < winPattern.length; i += 2) {
@@ -622,9 +618,12 @@ public class GameEngineService {
      * Get all pending (unresolved) valid claims for a game
      */
     @Transactional(readOnly = true)
-    public List<BingoClaim> getPendingClaims(Long gameId) {
+    public List<BingoClaimResponse> getPendingClaims(Long gameId) {
         return bingoClaimRepository
-                .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
+                .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID")
+                .stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     /**

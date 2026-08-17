@@ -2,7 +2,6 @@ package com.bingo.app.master.dto.mapper;
 
 import com.bingo.app.master.dto.response.*;
 import com.bingo.app.master.entity.*;
-import com.bingo.app.master.service.InviteService;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -67,16 +66,6 @@ public class MasterMapper {
                 .role(inviteCode.getRole())
                 .active(inviteCode.isActive())
                 .createdAt(inviteCode.getCreatedAt())
-                .build();
-    }
-
-    public InviteCodeStatsResponse toDto(InviteService.InviteCodeStats stats) {
-        if (stats == null) return null;
-        return InviteCodeStatsResponse.builder()
-                .totalCodes(stats.getTotalCodes())
-                .activeCodes(stats.getActiveCodes())
-                .usedCodes(stats.getUsedCodes())
-                .totalRegistrations(stats.getTotalRegistrations())
                 .build();
     }
 

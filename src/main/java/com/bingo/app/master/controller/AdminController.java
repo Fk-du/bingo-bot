@@ -33,11 +33,7 @@ public class AdminController {
     @GetMapping
     @PreAuthorize("hasRole('SUPER_ADMIN')")
     public ApiResponse<List<AdminListItem>> listAdmins() {
-        var admins = userService.findAllByRole(Role.ADMIN)
-                .stream()
-                .map(masterMapper::toAdminListItem)
-                .toList();
-        return ApiResponse.ok(admins);
+        return ApiResponse.ok(userService.findAllByRole(Role.ADMIN));
     }
 
     @PostMapping("/invite")
@@ -57,7 +53,7 @@ public class AdminController {
             case "REJECT" -> userService.rejectAdmin(adminUserId);
             default -> throw new IllegalArgumentException("Unknown status: " + request.status());
         };
-        return ApiResponse.ok("Admin status updated", masterMapper.toAdminListItem(admin));
+        return ApiResponse.ok("Admin status updated", admin);
     }
 
     @PostMapping("/fund-requests")

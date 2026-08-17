@@ -4,7 +4,6 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.request.CreateWithdrawalRequest;
 import com.bingo.app.tenant.dto.request.WithdrawalPayRequest;
 import com.bingo.app.common.dto.ApiResponse;
-import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.WithdrawalResponse;
 import com.bingo.app.tenant.service.WalletService;
 import jakarta.validation.Valid;
@@ -21,7 +20,6 @@ import java.util.List;
 public class WithdrawalController {
 
     private final WalletService walletService;
-    private final TenantMapper tenantMapper;
 
     @PostMapping
     @PreAuthorize("hasRole('PLAYER')")
@@ -30,7 +28,7 @@ public class WithdrawalController {
             @Valid @RequestBody CreateWithdrawalRequest request) {
         var withdrawal = walletService.createWithdrawRequest(
                 principal.getUser().getId(), request.amount(), request.payoutDetails());
-        return ApiResponse.ok("Withdrawal request created", tenantMapper.toDto(withdrawal));
+        return ApiResponse.ok("Withdrawal request created", withdrawal);
     }
 
     @GetMapping
@@ -38,11 +36,7 @@ public class WithdrawalController {
         var user = principal.getUser();
         switch (user.getRole()) {
             case ADMIN -> {
-                var requests = walletService.getPendingWithdrawsForAdminPlayers(user.getId())
-                        .stream()
-                        .map(tenantMapper::toDto)
-                        .toList();
-                return ApiResponse.ok(requests);
+                return ApiResponse.ok(walletService.getPendingWithdrawsForAdminPlayers(user.getId()));
             }
             default -> {
                 return ApiResponse.ok(List.of());

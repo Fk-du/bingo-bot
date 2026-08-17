@@ -38,20 +38,38 @@ public class TelegramAuthService {
 
     public User authenticate(String initData) {
         try {
-            log.debug("Authenticating with initData: {}", initData);
+            log.debug("Authenticating with initData length={}", initData != null ? initData.length() : 0);
+
+            Map<String, String> rawParams = parseInitDataRaw(initData);
             Map<String, String> params = parseInitData(initData);
+
             log.debug(
-                    "Telegram auth payload keys={}, hashPresent={}, signaturePresent={}, botId={}, initDataLength={}",
-                    params.keySet(),
-                    params.containsKey("hash"),
-                    params.containsKey("signature"),
-                    bingoTelegramBot.getBotId(),
-                    initData != null ? initData.length() : 0
+                    "Telegram auth payload keys={}, hashPresent={}, signaturePresent={}, botId={}",
+                    rawParams.keySet(),
+                    rawParams.containsKey("hash"),
+                    rawParams.containsKey("signature"),
+                    bingoTelegramBot.getBotId()
             );
 
-            if (!verifySignature(params)) {
+            if (!verifySignature(rawParams)) {
                 log.warn("Invalid Telegram signature");
                 return null;
+            }
+
+            String authDateStr = rawParams.get("auth_date");
+            if (authDateStr != null) {
+                try {
+                    long authDate = Long.parseLong(authDateStr);
+                    long now = System.currentTimeMillis() / 1000;
+                    long maxAge = 86400;
+                    if (now - authDate > maxAge) {
+                        log.warn("Telegram auth data expired: authDate={}, now={}, diff={}s", authDate, now, now - authDate);
+                        return null;
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid auth_date value: {}", authDateStr);
+                    return null;
+                }
             }
 
             String userJson = params.get("user");
@@ -69,9 +87,19 @@ public class TelegramAuthService {
             return userService.findOrCreateUser(telegramId, username, firstName, lastName);
 
         } catch (Exception e) {
-            log.error("Authentication error: {}", e.getMessage());
+            log.error("Authentication error: {} [{}]", e.getMessage(), e.getClass().getSimpleName(), e);
             return null;
         }
+    }
+
+    private Map<String, String> parseInitDataRaw(String initData) {
+        return Arrays.stream(initData.split("&"))
+                .map(part -> part.split("=", 2))
+                .collect(Collectors.toMap(
+                        arr -> arr[0],
+                        arr -> arr.length > 1 ? arr[1] : "",
+                        (a, b) -> a
+                ));
     }
 
     private Map<String, String> parseInitData(String initData) {

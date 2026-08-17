@@ -1,5 +1,9 @@
 package com.bingo.app.tenant.service;
 
+import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.response.CardResponse;
+import com.bingo.app.tenant.dto.response.GameCardResponse;
+import com.bingo.app.tenant.dto.response.PlayerCardResponse;
 import com.bingo.app.tenant.entity.*;
 import com.bingo.app.tenant.enums.AssignmentStatus;
 import com.bingo.app.tenant.enums.GameStatus;
@@ -31,6 +35,7 @@ public class CardService {
     private final GameRepository gameRepository;
     private final PlayerService playerService;
     private final ObjectMapper objectMapper;
+    private final TenantMapper tenantMapper;
 
     private static final int[][] COLUMN_RANGES = {
             {1, 15},   // B
@@ -47,7 +52,7 @@ public class CardService {
      * Generate a unique Bingo card
      */
     @Transactional
-    public Card generateUniqueCard() {
+    public CardResponse generateUniqueCard() {
         int maxAttempts = 100;
 
         for (int attempt = 0; attempt < maxAttempts; attempt++) {
@@ -64,7 +69,7 @@ public class CardService {
                         .usageCount(0)
                         .winRate(0.0)
                         .build();
-                return cardRepository.save(card);
+                return tenantMapper.toDto(cardRepository.save(card));
             }
         }
 
@@ -81,7 +86,7 @@ public class CardService {
 
         for (int i = 0; i < count && generated < count; i++) {
             try {
-                Card card = generateUniqueCard();
+                generateUniqueCard();
                 generated++;
                 if (generated % 100 == 0) {
                     log.info("Generated {} unique cards so far", generated);
@@ -130,7 +135,7 @@ public class CardService {
      * Assign a card to a player for a specific game
      */
     @Transactional
-    public GameCard assignCard(Long gameId, Long playerId) {
+    public GameCardResponse assignCard(Long gameId, Long playerId) {
         // Validate game exists and is in registration phase
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -159,7 +164,7 @@ public class CardService {
         // Get or create player's assigned card
         PlayerCard playerCard = playerCardRepository
                 .findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
-                .orElseGet(() -> assignNewCardToPlayer(playerId));
+                .orElseGet(() -> assignNewCardToPlayerEntity(playerId));
 
         // Create game card entry
         GameCard gameCard = GameCard.builder()
@@ -184,56 +189,32 @@ public class CardService {
         playerCard.setGamesPlayed(playerCard.getGamesPlayed() + 1);
         playerCardRepository.save(playerCard);
 
-        return gameCardRepository.save(gameCard);
+        return tenantMapper.toDto(gameCardRepository.save(gameCard));
     }
 
     /**
      * Assign a new card to a player (for ongoing use)
      */
     @Transactional
-    public PlayerCard assignNewCardToPlayer(Long playerId) {
-        // Check if player already has an active card
-        playerCardRepository.findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
-                .ifPresent(existing -> {
-                    throw new RuntimeException("Player already has an active card");
-                });
-
-        // Get an available card
-        Card card = cardRepository.findAvailableCards().stream()
-                .findFirst()
-                .orElseGet(() -> generateUniqueCard());
-
-        // Mark card as used
-        card.setUsed(true);
-        card.setUsageCount(card.getUsageCount() + 1);
-        cardRepository.save(card);
-
-        // Create player card assignment
-        PlayerCard playerCard = PlayerCard.builder()
-                .playerId(playerId)
-                .card(card)
-                .status(AssignmentStatus.ACTIVE)
-                .gamesPlayed(0)
-                .gamesWon(0)
-                .assignedAt(LocalDateTime.now())
-                .build();
-
-        return playerCardRepository.save(playerCard);
+    public PlayerCardResponse assignNewCardToPlayer(Long playerId) {
+        return tenantMapper.toDto(assignNewCardToPlayerEntity(playerId));
     }
 
     /**
      * Get player's current active card
      */
-    public PlayerCard getPlayerActiveCard(Long playerId) {
-        return playerCardRepository.findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
-                .orElseThrow(() -> new RuntimeException("No active card found for player"));
+    public PlayerCardResponse getPlayerActiveCard(Long playerId) {
+        return tenantMapper.toDto(playerCardRepository.findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
+                .orElseThrow(() -> new RuntimeException("No active card found for player")));
     }
 
     /**
      * Get all cards for a player
      */
-    public List<GameCard> findCardsForPlayer(Long playerId) {
-        return gameCardRepository.findByPlayerIdOrderByCreatedAtDesc(playerId);
+    public List<GameCardResponse> findCardsForPlayer(Long playerId) {
+        return gameCardRepository.findByPlayerIdOrderByCreatedAtDesc(playerId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
     }
 
     /**
@@ -281,10 +262,11 @@ public class CardService {
     /**
      * Get available cards for a player
      */
-    public List<Card> getAvailableCards(int limit, int offset) {
+    public List<CardResponse> getAvailableCards(int limit, int offset) {
         return cardRepository.findAvailableCards().stream()
                 .skip(offset)
                 .limit(limit)
+                .map(tenantMapper::toDto)
                 .collect(Collectors.toList());
     }
 
@@ -328,6 +310,49 @@ public class CardService {
     @Transactional
     public void unlockPlayerCard(Long playerId) {
         playerCardRepository.unlockPlayerCard(playerId);
+    }
+
+    private PlayerCard assignNewCardToPlayerEntity(Long playerId) {
+        // Check if player already has an active card
+        playerCardRepository.findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
+                .ifPresent(existing -> {
+                    throw new RuntimeException("Player already has an active card");
+                });
+
+        // Get an available card
+        Card card = cardRepository.findAvailableCards().stream()
+                .findFirst()
+                .orElseGet(() -> {
+                    // Generate inline to avoid circular call issues
+                    int[][] numbers = generateCardNumbers();
+                    String numbersJson = toJson(numbers);
+                    String numbersHash = hashNumbers(numbersJson);
+                    Card newCard = Card.builder()
+                            .numbers(numbersJson)
+                            .numbersHash(numbersHash)
+                            .used(false)
+                            .usageCount(0)
+                            .winRate(0.0)
+                            .build();
+                    return cardRepository.save(newCard);
+                });
+
+        // Mark card as used
+        card.setUsed(true);
+        card.setUsageCount(card.getUsageCount() + 1);
+        cardRepository.save(card);
+
+        // Create player card assignment
+        PlayerCard playerCard = PlayerCard.builder()
+                .playerId(playerId)
+                .card(card)
+                .status(AssignmentStatus.ACTIVE)
+                .gamesPlayed(0)
+                .gamesWon(0)
+                .assignedAt(LocalDateTime.now())
+                .build();
+
+        return playerCardRepository.save(playerCard);
     }
 
     private String toJson(int[][] numbers) {
