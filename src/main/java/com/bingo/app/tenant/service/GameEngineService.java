@@ -1,6 +1,8 @@
 package com.bingo.app.tenant.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
+import com.bingo.app.master.entity.TenantRegistry;
+import com.bingo.app.master.repository.TenantRegistryRepository;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.entity.*;
@@ -28,6 +30,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
+import org.springframework.context.event.EventListener;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.scheduling.annotation.Scheduled;
+
 @Service
 @Slf4j
 @RequiredArgsConstructor
@@ -43,12 +49,16 @@ public class GameEngineService {
     private final TransactionTemplate transactionTemplate;
     private final SimpMessagingTemplate messagingTemplate;
     private final TenantMapper tenantMapper;
+    private final TenantRegistryRepository tenantRegistryRepository;
 
     @Value("${bingo.fees.platform-fee-rate:0.10}")
     private BigDecimal platformFeeRate;
 
     @Value("${bingo.fees.agent-commission-rate:0.05}")
     private BigDecimal agentCommissionRate;
+
+    @Value("${bingo.game.claim-timeout-seconds:300}")
+    private int claimTimeoutSeconds;
 
     // Track active game schedulers
     private final ScheduledThreadPoolExecutor taskScheduler = new ScheduledThreadPoolExecutor(4);
@@ -111,6 +121,116 @@ public class GameEngineService {
         publishGameStatusEvent(gameId, GameStatus.IN_PROGRESS);
 
         log.info("Started automatic number calling for game {} every {} seconds", gameId, interval);
+    }
+
+    /**
+     * Recover active game schedulers after server restart.
+     * Iterates over all registered tenants and restarts schedulers for IN_PROGRESS games.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverActiveGames() {
+        log.info("Recovering active game schedulers...");
+
+        List<TenantRegistry> tenants;
+        try {
+            tenants = tenantRegistryRepository.findAll();
+        } catch (Exception e) {
+            log.warn("Could not load tenant registry for recovery: {}", e.getMessage());
+            return;
+        }
+
+        int recovered = 0;
+        for (TenantRegistry tenant : tenants) {
+            String tenantId = "agent_" + tenant.getAdminUserId();
+            try {
+                TenantContext.setTenant(tenantId);
+                List<Game> activeGames = gameRepository.findByStatus(GameStatus.IN_PROGRESS);
+                for (Game game : activeGames) {
+                    try {
+                        startCalling(game.getId());
+                        recovered++;
+                        log.info("Recovered scheduler for game {} (tenant {})", game.getId(), tenantId);
+                    } catch (Exception e) {
+                        log.error("Failed to recover scheduler for game {}: {}", game.getId(), e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Failed to query games for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        }
+
+        log.info("Active game recovery complete. Recovered {} game(s).", recovered);
+    }
+
+    /**
+     * Auto-reject claims that have been pending longer than the configured timeout.
+     * Runs every 30 seconds across all tenants.
+     */
+    @Scheduled(fixedDelay = 30_000)
+    public void enforceClaimTimeout() {
+        List<TenantRegistry> tenants;
+        try {
+            tenants = tenantRegistryRepository.findAll();
+        } catch (Exception e) {
+            return;
+        }
+
+        for (TenantRegistry tenant : tenants) {
+            String tenantId = "agent_" + tenant.getAdminUserId();
+            try {
+                TenantContext.setTenant(tenantId);
+                List<Game> pendingGames = gameRepository.findByStatus(GameStatus.CLAIM_PENDING);
+                for (Game game : pendingGames) {
+                    try {
+                        processClaimTimeout(game);
+                    } catch (Exception e) {
+                        log.error("Error processing claim timeout for game {}: {}", game.getId(), e.getMessage());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Error checking claim timeouts for tenant {}: {}", tenantId, e.getMessage());
+            } finally {
+                TenantContext.clear();
+            }
+        }
+    }
+
+    private void processClaimTimeout(Game game) {
+        List<BingoClaim> pendingClaims = bingoClaimRepository
+                .findByGameIdAndResultAndValidatedAtIsNull(game.getId(), "VALID");
+
+        if (pendingClaims.isEmpty()) {
+            return;
+        }
+
+        BingoClaim oldestClaim = pendingClaims.get(0);
+        if (oldestClaim.getClaimedAt() == null) {
+            return;
+        }
+
+        Duration elapsed = Duration.between(oldestClaim.getClaimedAt(), LocalDateTime.now());
+        if (elapsed.getSeconds() < claimTimeoutSeconds) {
+            return;
+        }
+
+        log.warn("Game {}: Claim timeout reached ({}s elapsed). Auto-rejecting {} pending claim(s).",
+                game.getId(), elapsed.getSeconds(), pendingClaims.size());
+
+        for (BingoClaim claim : pendingClaims) {
+            claim.setResult("REJECTED");
+            claim.setValidatedAt(LocalDateTime.now());
+            claim.setRejectionReason("Claim timed out after " + claimTimeoutSeconds + " seconds");
+            bingoClaimRepository.save(claim);
+        }
+
+        game.setStatus(GameStatus.IN_PROGRESS);
+        gameRepository.save(game);
+        startCalling(game.getId());
+        publishClaimResolvedEvent(game.getId(), GameStatus.IN_PROGRESS);
+
+        log.info("Game {}: All timed-out claims rejected, game resumed.", game.getId());
     }
 
     /**
@@ -210,6 +330,8 @@ public class GameEngineService {
             game.setTotalNumbersCalled(game.getTotalNumbersCalled() + 1);
             gameRepository.save(game);
         }
+
+        publishNumberCalledEvent(gameId, calledNumber);
 
         log.info("Game {}: Manually called number {}", gameId, number);
         return number;
@@ -337,12 +459,13 @@ public class GameEngineService {
 
         Long winnerId = claim.getPlayerId();
 
-        // Calculate prize distribution (each winner gets full prize minus fees)
+        // Calculate prize distribution — fees deducted once from pool, then split among winners
         BigDecimal prizePool = game.getPrizePool();
         BigDecimal platformFee = prizePool.multiply(platformFeeRate);
         BigDecimal afterFee = prizePool.subtract(platformFee);
         BigDecimal agentCommission = afterFee.multiply(agentCommissionRate);
-        BigDecimal winnerAmount = afterFee.subtract(agentCommission);
+        BigDecimal netPool = afterFee.subtract(agentCommission);
+        BigDecimal winnerAmount = netPool.divide(BigDecimal.valueOf(MAX_WINNERS), 2, java.math.RoundingMode.HALF_UP);
 
         // Mark winner card
         GameCard winnerCard = gameCardRepository.findByGameIdAndPlayerId(gameId, winnerId)
@@ -353,8 +476,13 @@ public class GameEngineService {
         // Credit winnings to player
         walletService.creditWinnings(winnerId, winnerAmount, gameId);
 
-        // Deduct platform fee from agent
-        walletService.deductPlatformFee(game.getAdminUserId(), platformFee, gameId);
+        // Deduct platform fee and credit agent commission only ONCE (on first winner)
+        long previousWinners = bingoClaimRepository
+                .countByGameIdAndResultAndValidatedAtIsNotNull(gameId, "VALID");
+        if (previousWinners == 0) {
+            walletService.deductPlatformFee(game.getAdminUserId(), platformFee, gameId);
+            walletService.creditAgentCommission(game.getAdminUserId(), agentCommission, gameId);
+        }
 
         // Update approved claim
         claim.setRewardAmount(winnerAmount);
@@ -467,6 +595,9 @@ public class GameEngineService {
 
         stopCalling(gameId);
 
+        // Refund entry fees to all registered players (no winners in this path)
+        refundAllPlayersForGame(gameId, game.getEntryFee());
+
         game.setStatus(GameStatus.ENDED);
         game.setEndTime(LocalDateTime.now());
         gameRepository.save(game);
@@ -477,31 +608,110 @@ public class GameEngineService {
     }
 
     /**
-     * Validate Bingo claim
+     * Validate Bingo claim — respects the game's configured winning pattern.
+     *
+     * SINGLE_LINE: any one of the 12 line patterns (rows, columns, diagonals) is complete.
+     * DOUBLE_LINE: at least two distinct line patterns are complete.
+     * FULL_HOUSE:  all 24 non-free cells are called.
+     * FOUR_CORNERS: the four corner cells are called.
+     * BLACKOUT: same as FULL_HOUSE (alias).
+     * L_SHAPE: bottom row + first column complete.
+     * T_SHAPE: top row + third column complete.
+     * X_SHAPE: both diagonals complete.
+     * POSTAGE_STAMP: any 2x2 block in a corner is complete.
      */
     private boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
         Set<Integer> calledSet = new HashSet<>(calledNumbers);
         calledSet.add(0);
 
+        if ("FULL_HOUSE".equals(pattern) || "BLACKOUT".equals(pattern)) {
+            for (int row = 0; row < 5; row++) {
+                for (int col = 0; col < 5; col++) {
+                    if (row == 2 && col == 2) continue;
+                    if (!calledSet.contains(cardNumbers[row][col])) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if ("FOUR_CORNERS".equals(pattern)) {
+            return calledSet.contains(cardNumbers[0][0])
+                    && calledSet.contains(cardNumbers[0][4])
+                    && calledSet.contains(cardNumbers[4][0])
+                    && calledSet.contains(cardNumbers[4][4]);
+        }
+
+        if ("X_SHAPE".equals(pattern)) {
+            // Both diagonals
+            boolean mainDiag = true, antiDiag = true;
+            for (int i = 0; i < 5; i++) {
+                if (!calledSet.contains(cardNumbers[i][i])) mainDiag = false;
+                if (!calledSet.contains(cardNumbers[i][4 - i])) antiDiag = false;
+            }
+            return mainDiag && antiDiag;
+        }
+
+        if ("L_SHAPE".equals(pattern)) {
+            // Bottom row (4,0-4) + first column (0-4,0) — center counted once
+            boolean bottomRow = true, firstCol = true;
+            for (int col = 0; col < 5; col++) {
+                if (!calledSet.contains(cardNumbers[4][col])) bottomRow = false;
+            }
+            for (int row = 0; row < 5; row++) {
+                if (!calledSet.contains(cardNumbers[row][0])) firstCol = false;
+            }
+            return bottomRow && firstCol;
+        }
+
+        if ("T_SHAPE".equals(pattern)) {
+            // Top row (0,0-4) + third column (0-4,2)
+            boolean topRow = true, thirdCol = true;
+            for (int col = 0; col < 5; col++) {
+                if (!calledSet.contains(cardNumbers[0][col])) topRow = false;
+            }
+            for (int row = 0; row < 5; row++) {
+                if (!calledSet.contains(cardNumbers[row][2])) thirdCol = false;
+            }
+            return topRow && thirdCol;
+        }
+
+        if ("POSTAGE_STAMP".equals(pattern)) {
+            // Any 2x2 block in the four corners
+            return is2x2Complete(cardNumbers, calledSet, 0, 0)
+                    || is2x2Complete(cardNumbers, calledSet, 0, 3)
+                    || is2x2Complete(cardNumbers, calledSet, 3, 0)
+                    || is2x2Complete(cardNumbers, calledSet, 3, 3);
+        }
+
+        int completedLines = 0;
         for (int[] winPattern : WINNING_PATTERNS) {
-            boolean patternComplete = true;
+            boolean lineComplete = true;
             for (int i = 0; i < winPattern.length; i += 2) {
                 int row = winPattern[i];
                 int col = winPattern[i + 1];
-                int number = cardNumbers[row][col];
-
-                if (!calledSet.contains(number)) {
-                    patternComplete = false;
+                if (!calledSet.contains(cardNumbers[row][col])) {
+                    lineComplete = false;
                     break;
                 }
             }
-
-            if (patternComplete) {
-                return true;
+            if (lineComplete) {
+                completedLines++;
             }
         }
 
-        return false;
+        return switch (pattern != null ? pattern : "SINGLE_LINE") {
+            case "DOUBLE_LINE" -> completedLines >= 2;
+            default -> completedLines >= 1;
+        };
+    }
+
+    private boolean is2x2Complete(int[][] card, Set<Integer> called, int startRow, int startCol) {
+        return called.contains(card[startRow][startCol])
+                && called.contains(card[startRow][startCol + 1])
+                && called.contains(card[startRow + 1][startCol])
+                && called.contains(card[startRow + 1][startCol + 1]);
     }
 
     /**
@@ -606,10 +816,10 @@ public class GameEngineService {
         }
 
         stopCalling(gameId);
-        game.setStatus(GameStatus.CLAIM_PENDING);
+        game.setStatus(GameStatus.PAUSED);
         gameRepository.save(game);
 
-        publishGameStatusEvent(gameId, GameStatus.CLAIM_PENDING);
+        publishGameStatusEvent(gameId, GameStatus.PAUSED);
 
         log.info("Game {} paused", gameId);
     }
@@ -633,7 +843,7 @@ public class GameEngineService {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
-        if (game.getStatus() != GameStatus.CLAIM_PENDING) {
+        if (game.getStatus() != GameStatus.PAUSED) {
             throw new RuntimeException("Game is not paused");
         }
 
@@ -697,6 +907,22 @@ public class GameEngineService {
         ObjectNode data = objectMapper.createObjectNode();
         data.put("status", status.name());
         publishEvent(gameId, "CLAIM_RESOLVED", data);
+    }
+
+    /**
+     * Refund entry fees to all registered players for a game with no winners.
+     */
+    private void refundAllPlayersForGame(Long gameId, BigDecimal entryFee) {
+        if (entryFee == null || entryFee.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        List<GameCard> allCards = gameCardRepository.findByGameId(gameId);
+        for (GameCard card : allCards) {
+            walletService.refundPlayer(card.getPlayerId(), entryFee, gameId);
+        }
+
+        log.info("Game {}: Refunded entry fee {} to {} players", gameId, entryFee, allCards.size());
     }
 
     @lombok.Builder

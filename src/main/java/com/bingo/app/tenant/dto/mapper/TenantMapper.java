@@ -6,6 +6,8 @@ import com.bingo.app.tenant.entity.*;
 import com.bingo.app.tenant.service.GameEngineService;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class TenantMapper {
 
@@ -168,12 +170,16 @@ public class TenantMapper {
 
     public GameStateResponse toGameStateDto(GameEngineService.GameState state) {
         if (state == null) return null;
+        List<String> labeled = state.getCalledNumbers() != null
+                ? state.getCalledNumbers().stream().map(GameStateResponse::numberToLabel).toList()
+                : List.of();
         return GameStateResponse.builder()
                 .gameId(state.getGameId())
                 .status(state.getStatus())
                 .currentCallIndex(state.getCurrentCallIndex())
                 .totalNumbersCalled(state.getTotalNumbersCalled())
                 .calledNumbers(state.getCalledNumbers())
+                .calledNumbersLabeled(labeled)
                 .prizePool(state.getPrizePool())
                 .playerCard(state.getPlayerCard())
                 .hasPlayerCard(state.isHasPlayerCard())
@@ -185,6 +191,9 @@ public class TenantMapper {
     public AdminGameStateResponse toAdminGameStateDto(GameEngineService.AdminGameState state) {
         if (state == null) return null;
         Game game = state.getGame();
+        List<String> labeled = state.getCalledNumbers() != null
+                ? state.getCalledNumbers().stream().map(GameStateResponse::numberToLabel).toList()
+                : List.of();
         return AdminGameStateResponse.builder()
                 .gameId(game.getId())
                 .status(game.getStatus())
@@ -199,6 +208,7 @@ public class TenantMapper {
                 .endTime(game.getEndTime())
                 .createdAt(game.getCreatedAt())
                 .calledNumbers(state.getCalledNumbers())
+                .calledNumbersLabeled(labeled)
                 .playerCount(state.getPlayerCount())
                 .build();
     }

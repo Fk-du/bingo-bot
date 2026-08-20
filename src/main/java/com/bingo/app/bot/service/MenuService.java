@@ -38,7 +38,9 @@ public class MenuService {
 
         switch (user.getRole()) {
             case PLAYER -> {
-                message.setText("🎮 Welcome to BingoPlus!\n\nUse the Launch App button to access the game.");
+                message.setText("🎮 Welcome to BingoPlus!\n\nUse the buttons below to check your balance or view your active game, or launch the app.");
+                keyboard.add(createRow(createButton("💰 Check Balance", BotConstants.CHECK_BALANCE)));
+                keyboard.add(createRow(createButton("🎮 Active Game", BotConstants.ACTIVE_GAME)));
                 keyboard.add(createRow(createWebAppButton("🚀 Launch App")));
             }
             case ADMIN -> {

@@ -31,6 +31,6 @@ public interface GameCardRepository extends JpaRepository<GameCard, Long> {
     @Query("SELECT gc FROM GameCard gc WHERE gc.gameId = :gameId AND gc.winner = true")
     Optional<GameCard> findWinnerByGameId(@Param("gameId") Long gameId);
 
-    @Query("SELECT gc FROM GameCard gc JOIN Game g ON g.id = gc.gameId WHERE gc.playerId = :playerId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'CLAIM_PENDING')")
+    @Query("SELECT gc FROM GameCard gc JOIN Game g ON g.id = gc.gameId WHERE gc.playerId = :playerId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'PAUSED', 'CLAIM_PENDING')")
     List<GameCard> findByPlayerIdAndActiveGames(@Param("playerId") Long playerId);
 }

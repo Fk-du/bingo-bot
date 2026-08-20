@@ -22,5 +22,6 @@ public record AdminGameStateResponse(
         LocalDateTime endTime,
         LocalDateTime createdAt,
         List<Integer> calledNumbers,
+        List<String> calledNumbersLabeled,
         int playerCount
 ) {}

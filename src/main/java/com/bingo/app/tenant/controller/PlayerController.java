@@ -51,8 +51,8 @@ public class PlayerController {
     public ApiResponse<WalletResponse> getPlayerWallet(@PathVariable Long id) {
         PlayerResponse player = playerService.findByUserId(id);
         return ApiResponse.ok(WalletResponse.builder()
-                .balance(player.getBalance())
-                .frozenBalance(player.getFrozenBalance())
+                .balance(player.balance())
+                .frozenBalance(player.frozenBalance())
                 .build());
     }
 }

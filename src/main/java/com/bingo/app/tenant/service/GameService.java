@@ -5,9 +5,15 @@ import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.entity.CalledNumber;
 import com.bingo.app.tenant.entity.Game;
+import com.bingo.app.tenant.entity.GameCard;
+import com.bingo.app.tenant.entity.Transaction;
 import com.bingo.app.tenant.enums.GameStatus;
+import com.bingo.app.tenant.enums.TransactionStatus;
+import com.bingo.app.tenant.enums.TransactionType;
 import com.bingo.app.tenant.repository.CalledNumberRepository;
+import com.bingo.app.tenant.repository.GameCardRepository;
 import com.bingo.app.tenant.repository.GameRepository;
+import com.bingo.app.tenant.repository.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,6 +34,9 @@ public class GameService {
 
     private final GameRepository gameRepository;
     private final CalledNumberRepository calledNumberRepository;
+    private final GameCardRepository gameCardRepository;
+    private final TransactionRepository transactionRepository;
+    private final PlayerService playerService;
     private final TenantMapper tenantMapper;
 
     @Transactional
@@ -45,7 +54,7 @@ public class GameService {
                 .totalNumbersCalled(0)
                 .prizePool(BigDecimal.ZERO)
                 .winningPattern(request.getWinningPattern() != null ? request.getWinningPattern() : "SINGLE_LINE")
-                .callInterval(5)
+                .callInterval(request.getCallInterval() != null ? request.getCallInterval() : 5)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -69,7 +78,7 @@ public class GameService {
     @Transactional(readOnly = true)
     public Optional<GameResponse> findCurrentGameForAdmin(Long adminUserId) {
         return gameRepository.findByAdminUserIdAndStatusIn(adminUserId,
-                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.CLAIM_PENDING))
+                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
                 .map(tenantMapper::toDto);
     }
 
@@ -84,6 +93,11 @@ public class GameService {
 
         if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
             throw new RuntimeException("Game cannot be started. Current status: " + game.getStatus());
+        }
+
+        long playerCount = gameCardRepository.countByGameId(gameId);
+        if (playerCount < 2) {
+            throw new RuntimeException("Game needs at least 2 players to start. Currently: " + playerCount);
         }
 
         List<Integer> sequence = generateSealedNumberSequence();
@@ -112,6 +126,8 @@ public class GameService {
             throw new RuntimeException("Can only cancel a game that hasn't started yet");
         }
 
+        refundPlayersForGame(gameId, game.getEntryFee());
+
         game.setStatus(GameStatus.ENDED);
         game.setEndTime(LocalDateTime.now());
         gameRepository.save(game);
@@ -131,6 +147,8 @@ public class GameService {
         if (game.getStatus() == GameStatus.ENDED) {
             throw new RuntimeException("Game already ended");
         }
+
+        refundNonWinnersForGame(gameId, game.getEntryFee());
 
         game.setStatus(GameStatus.ENDED);
         game.setEndTime(LocalDateTime.now());
@@ -160,9 +178,23 @@ public class GameService {
     }
 
     @Transactional(readOnly = true)
+    public List<GameResponse> getGamesForPlayer(Long playerId) {
+        List<Long> gameIds = gameCardRepository.findByPlayerIdOrderByCreatedAtDesc(playerId).stream()
+                .map(GameCard::getGameId)
+                .distinct()
+                .toList();
+        return gameIds.stream()
+                .map(gameRepository::findById)
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .map(tenantMapper::toDto)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
     public long getActiveGamesCount(Long adminUserId) {
         return gameRepository.countByAdminUserIdAndStatusIn(adminUserId,
-                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.CLAIM_PENDING));
+                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.PAUSED, GameStatus.CLAIM_PENDING));
     }
 
     @Transactional
@@ -217,5 +249,62 @@ public class GameService {
             calledNumberRepository.save(calledNumber);
         }
         log.info("Saved number sequence for game {}: {} numbers", gameId, sequence.size());
+    }
+
+    /**
+     * Refund entry fees to all registered players (for cancelled games).
+     */
+    private void refundPlayersForGame(Long gameId, BigDecimal entryFee) {
+        if (entryFee == null || entryFee.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        List<GameCard> allCards = gameCardRepository.findByGameId(gameId);
+        for (GameCard card : allCards) {
+            Long playerId = card.getPlayerId();
+            playerService.addBalance(playerId, entryFee);
+
+            transactionRepository.save(Transaction.builder()
+                    .userId(playerId)
+                    .type(TransactionType.REFUND.name())
+                    .amount(entryFee)
+                    .status(TransactionStatus.COMPLETED)
+                    .referenceId(gameId)
+                    .description("Entry fee refund for cancelled game " + gameId)
+                    .createdAt(LocalDateTime.now())
+                    .build());
+
+            log.info("Refunded {} to player {} for cancelled game {}", entryFee, playerId, gameId);
+        }
+    }
+
+    /**
+     * Refund entry fees to non-winner registered players (for manually ended or no-winner games).
+     */
+    private void refundNonWinnersForGame(Long gameId, BigDecimal entryFee) {
+        if (entryFee == null || entryFee.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        List<GameCard> allCards = gameCardRepository.findByGameId(gameId);
+        for (GameCard card : allCards) {
+            if (card.isWinner()) {
+                continue;
+            }
+            Long playerId = card.getPlayerId();
+            playerService.addBalance(playerId, entryFee);
+
+            transactionRepository.save(Transaction.builder()
+                    .userId(playerId)
+                    .type(TransactionType.REFUND.name())
+                    .amount(entryFee)
+                    .status(TransactionStatus.COMPLETED)
+                    .referenceId(gameId)
+                    .description("Entry fee refund for ended game " + gameId)
+                    .createdAt(LocalDateTime.now())
+                    .build());
+
+            log.info("Refunded {} to player {} for ended game {}", entryFee, playerId, gameId);
+        }
     }
 }

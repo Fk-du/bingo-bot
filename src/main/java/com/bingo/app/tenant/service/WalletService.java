@@ -455,19 +455,47 @@ public class WalletService {
     }
 
     @Transactional
+    public void refundPlayer(Long playerId, BigDecimal amount, Long gameId) {
+        playerService.addBalance(playerId, amount);
+
+        createTransaction(playerId, TransactionType.REFUND, amount,
+                TransactionStatus.COMPLETED, gameId, "Entry fee refund for ended game " + gameId);
+    }
+
+    @Transactional
+    public void creditAgentCommission(Long adminUserId, BigDecimal amount, Long gameId) {
+        User admin = userRepository.findById(adminUserId)
+                .orElseThrow(() -> new RuntimeException("Admin not found"));
+
+        admin.setBalance(admin.getBalance().add(amount));
+        userRepository.save(admin);
+
+        createTransaction(adminUserId, TransactionType.AGENT_COMMISSION, amount,
+                TransactionStatus.COMPLETED, gameId, "Agent commission from game " + gameId);
+    }
+
+    @Transactional
     public void deductPlatformFee(Long adminUserId, BigDecimal amount, Long gameId) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
 
-        if (admin.getBalance().compareTo(amount) < 0) {
-            log.warn("Admin {} has insufficient balance for platform fee {}", adminUserId, amount);
+        BigDecimal adminBalance = admin.getBalance() != null ? admin.getBalance() : BigDecimal.ZERO;
+        BigDecimal actualDeduction = amount.min(adminBalance);
+        if (actualDeduction.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Admin {} has zero balance — platform fee {} cannot be collected for game {}",
+                    adminUserId, amount, gameId);
             return;
         }
 
-        admin.setBalance(admin.getBalance().subtract(amount));
+        if (actualDeduction.compareTo(amount) < 0) {
+            log.warn("Admin {} has insufficient balance for platform fee: has {}, needs {}. Collecting {}",
+                    adminUserId, adminBalance, amount, actualDeduction);
+        }
+
+        admin.setBalance(admin.getBalance().subtract(actualDeduction));
         userRepository.save(admin);
 
-        createTransaction(adminUserId, TransactionType.PLATFORM_FEE, amount,
+        createTransaction(adminUserId, TransactionType.PLATFORM_FEE, actualDeduction,
                 TransactionStatus.COMPLETED, gameId, "Platform fee for game " + gameId);
     }
 

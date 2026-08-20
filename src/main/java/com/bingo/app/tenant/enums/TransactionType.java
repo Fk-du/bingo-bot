@@ -7,6 +7,8 @@ public enum TransactionType {
     BET,                 // Player placing bet
     WIN,                 // Player winning
     PLATFORM_FEE,        // Platform fee deduction
+    AGENT_COMMISSION,    // Agent commission from game winnings
     FUND_AGENT_TO_PLAYER,// Agent funding player
-    FUND_SUPER_ADMIN_TO_AGENT // Super admin funding agent
+    FUND_SUPER_ADMIN_TO_AGENT, // Super admin funding agent
+    REFUND               // Entry fee refund on cancelled/ended game
 }

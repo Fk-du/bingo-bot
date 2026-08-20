@@ -31,9 +31,11 @@ public interface GameRepository extends JpaRepository<Game, Long> {
     @Query("SELECT g FROM Game g WHERE g.id = :id")
     Optional<Game> findByIdForUpdate(@Param("id") Long id);
 
-    @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status != 'ENDED' ORDER BY g.createdAt DESC")
+    @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status NOT IN ('ENDED') ORDER BY g.createdAt DESC")
     Optional<Game> findActiveGameByAdmin(@Param("adminUserId") Long adminUserId);
 
-    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'CLAIM_PENDING')")
+    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'PAUSED', 'CLAIM_PENDING')")
     boolean hasActiveGame(@Param("adminUserId") Long adminUserId);
+
+    List<Game> findByStatus(GameStatus status);
 }

@@ -24,6 +24,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import org.springframework.scheduling.annotation.Scheduled;
+
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -34,6 +36,7 @@ public class CardService {
     private final GameCardRepository gameCardRepository;
     private final GameRepository gameRepository;
     private final PlayerService playerService;
+    private final WalletService walletService;
     private final ObjectMapper objectMapper;
     private final TenantMapper tenantMapper;
 
@@ -174,12 +177,12 @@ public class CardService {
                 .winner(false)
                 .build();
 
-        // Deduct entry fee from player balance
+        // Deduct entry fee from player balance (records BET transaction)
         if (playerService.getBalance(playerId).compareTo(game.getEntryFee()) < 0) {
             throw new RuntimeException("Insufficient balance");
         }
 
-        playerService.deductBalance(playerId, game.getEntryFee());
+        walletService.deductBet(playerId, game.getEntryFee(), gameId);
 
         // Update prize pool
         game.setPrizePool(game.getPrizePool().add(game.getEntryFee()));
@@ -275,6 +278,23 @@ public class CardService {
      */
     public long countAvailableCards() {
         return cardRepository.countByUsedFalse();
+    }
+
+    /**
+     * Automatically replenish card pool when it runs low.
+     * Runs daily at 3 AM. Generates 50 cards if pool drops below 20.
+     */
+    @Scheduled(cron = "0 0 3 * * ?")
+    public void replenishCardPool() {
+        long available = countAvailableCards();
+        if (available < 20) {
+            log.info("Card pool low ({} available). Generating 50 new cards.", available);
+            try {
+                generateCardPool(50);
+            } catch (Exception e) {
+                log.error("Failed to replenish card pool: {}", e.getMessage());
+            }
+        }
     }
 
     /**

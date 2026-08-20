@@ -40,12 +40,12 @@ public class BroadcastController {
         for (AdminListItem user : recipients) {
             try {
                 bot.execute(SendMessage.builder()
-                        .chatId(user.getTelegramId())
+                        .chatId(user.telegramId())
                         .text(request.message())
                         .build());
                 sent++;
             } catch (TelegramApiException e) {
-                log.warn("Broadcast failed for user {}: {}", user.getTelegramId(), e.getMessage());
+                log.warn("Broadcast failed for user {}: {}", user.telegramId(), e.getMessage());
                 failed++;
             }
         }

@@ -5,6 +5,7 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.CreateGameRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.request.GameSettingsUpdateRequest;
 import com.bingo.app.tenant.dto.response.AdminGameStateResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResultResponse;
@@ -57,13 +58,56 @@ public class GameController {
         return ApiResponse.ok("Game created", game);
     }
 
+    @PatchMapping("/{id}/settings")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<GameResponse> updateGameSettings(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @Valid @RequestBody GameSettingsUpdateRequest request) {
+        var game = gameService.updateGameSettings(id, principal.getUser().getId(),
+                request.maxPlayers(), request.callInterval(), request.winningPattern());
+        return ApiResponse.ok("Game settings updated", game);
+    }
+
+    @PostMapping("/{id}/call-next")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<String> callNextNumber(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var game = gameService.getGameById(id)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+        if (!game.adminUserId().equals(principal.getUser().getId())) {
+            throw new RuntimeException("Game does not belong to this admin");
+        }
+        Integer number = gameEngineService.callNumber(id);
+        if (number == null) {
+            return ApiResponse.ok("No more numbers to call or game is not in progress");
+        }
+        return ApiResponse.ok("Called number: " + number);
+    }
+
+    @PostMapping("/{id}/call/{number}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<String> callSpecificNumber(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @PathVariable Integer number) {
+        var game = gameService.getGameById(id)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+        if (!game.adminUserId().equals(principal.getUser().getId())) {
+            throw new RuntimeException("Game does not belong to this admin");
+        }
+        gameEngineService.callSpecificNumber(id, number);
+        return ApiResponse.ok("Called number: " + number);
+    }
+
     @PostMapping("/{id}/start")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<GameResponse> startGame(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) {
         var game = gameService.startGameForAdmin(principal.getUser().getId(), id);
-        gameEngineService.startCalling(game.getId());
+        gameEngineService.startCalling(game.id());
         return ApiResponse.ok("Game started", game);
     }
 
@@ -127,7 +171,7 @@ public class GameController {
         var gameCard = cardService.assignCard(id, principal.getUser().getId());
         return ApiResponse.ok("Registered for game", RegisterResponse.builder()
                 .gameId(id)
-                .cardId(gameCard.getCard().getId())
+                .cardId(gameCard.card().id())
                 .build());
     }
 
@@ -201,5 +245,17 @@ public class GameController {
         var game = gameService.getGameById(id)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
         return ApiResponse.ok(game);
+    }
+
+    @GetMapping("/history")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<List<GameResponse>> gameHistory(@AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(gameService.getAllGamesForAdmin(principal.getUser().getId()));
+    }
+
+    @GetMapping("/player/history")
+    @PreAuthorize("hasRole('PLAYER')")
+    public ApiResponse<List<GameResponse>> playerGameHistory(@AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(gameService.getGamesForPlayer(principal.getUser().getId()));
     }
 }
