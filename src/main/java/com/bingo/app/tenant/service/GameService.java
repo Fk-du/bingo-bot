@@ -39,7 +39,7 @@ public class GameService {
     private final PlayerService playerService;
     private final TenantMapper tenantMapper;
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse createGameWithEntryFee(Long adminUserId, CreateGameRequest request) {
         if (gameRepository.hasActiveGame(adminUserId)) {
             throw new RuntimeException("Admin already has an active game");
@@ -63,26 +63,26 @@ public class GameService {
         return tenantMapper.toDto(saved);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<GameResponse> findAdminWaitingGame(Long adminUserId) {
         return gameRepository.findByAdminUserIdAndStatus(adminUserId, GameStatus.REGISTRATION_OPEN)
                 .map(tenantMapper::toDto);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<GameResponse> findAdminStartedGame(Long adminUserId) {
         return gameRepository.findByAdminUserIdAndStatus(adminUserId, GameStatus.IN_PROGRESS)
                 .map(tenantMapper::toDto);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<GameResponse> findCurrentGameForAdmin(Long adminUserId) {
         return gameRepository.findByAdminUserIdAndStatusIn(adminUserId,
                 List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
                 .map(tenantMapper::toDto);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse startGameForAdmin(Long adminUserId, Long gameId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -113,7 +113,7 @@ public class GameService {
         return tenantMapper.toDto(saved);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void cancelGame(Long gameId, Long adminUserId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -135,7 +135,7 @@ public class GameService {
         log.info("Game cancelled: id={}, adminUserId={}", gameId, adminUserId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse endGameManually(Long gameId, Long adminUserId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -158,26 +158,26 @@ public class GameService {
         return tenantMapper.toDto(saved);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<GameResponse> getGameById(Long gameId) {
         return gameRepository.findById(gameId).map(tenantMapper::toDto);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<GameResponse> getAllGamesForAdmin(Long adminUserId) {
         return gameRepository.findAllByAdminUserIdOrderByCreatedAtDesc(adminUserId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<GameResponse> findAllGames() {
         return gameRepository.findAllByOrderByCreatedAtDesc().stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<GameResponse> getGamesForPlayer(Long playerId) {
         List<Long> gameIds = gameCardRepository.findByPlayerIdOrderByCreatedAtDesc(playerId).stream()
                 .map(GameCard::getGameId)
@@ -191,13 +191,13 @@ public class GameService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public long getActiveGamesCount(Long adminUserId) {
         return gameRepository.countByAdminUserIdAndStatusIn(adminUserId,
                 List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.PAUSED, GameStatus.CLAIM_PENDING));
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse updateGameSettings(Long gameId, Long adminUserId, Integer maxPlayers, Integer callInterval, String winningPattern) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));

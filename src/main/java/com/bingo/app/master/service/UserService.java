@@ -96,6 +96,7 @@ public class UserService {
             throw new RuntimeException("User is not an admin: " + adminUserId);
         }
         admin.setAdminApproved(true);
+        admin.setActive(true);
         return masterMapper.toAdminListItem(userRepository.save(admin));
     }
 
@@ -106,6 +107,7 @@ public class UserService {
         if (admin.getRole() != Role.ADMIN) {
             throw new RuntimeException("User is not an admin: " + adminUserId);
         }
+        admin.setAdminApproved(false);
         admin.setActive(false);
         return masterMapper.toAdminListItem(userRepository.save(admin));
     }

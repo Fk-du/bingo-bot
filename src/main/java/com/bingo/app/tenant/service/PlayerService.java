@@ -22,7 +22,7 @@ public class PlayerService {
     private final PlayerRepository playerRepository;
     private final TenantMapper tenantMapper;
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public PlayerResponse createPlayer(Long userId, Long adminUserId, Long parentId) {
         Player player = Player.builder()
                 .userId(userId)
@@ -35,53 +35,58 @@ public class PlayerService {
         return tenantMapper.toDto(playerRepository.save(player));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public PlayerResponse findByUserId(Long userId) {
         return tenantMapper.toDto(findPlayerEntityByUserId(userId));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<PlayerResponse> findByUserIdOrNull(Long userId) {
         return Optional.ofNullable(tenantMapper.toDto(findPlayerEntityOrNullByUserId(userId)));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<PlayerResponse> getPlayersByAdmin(Long adminUserId) {
         return playerRepository.findByAdminUserId(adminUserId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<PlayerResponse> getPlayersByParent(Long parentId) {
         return playerRepository.findByParentId(parentId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public long countByAdminUserId(Long adminUserId) {
         return playerRepository.countByAdminUserId(adminUserId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public long countByParentId(Long parentId) {
         return playerRepository.countByParentId(parentId);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<Long> getPlayerIdsByAdmin(Long adminUserId) {
         return playerRepository.findByAdminUserId(adminUserId).stream()
                 .map(Player::getUserId)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public BigDecimal getBalance(Long userId) {
         return findPlayerEntityByUserId(userId).getBalance();
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public Player findPlayerByUserId(Long userId) {
+        return findPlayerEntityByUserId(userId);
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void deductBalance(Long userId, BigDecimal amount) {
         int updated = playerRepository.deductBalance(userId, amount);
         if (updated == 0) {
@@ -89,12 +94,12 @@ public class PlayerService {
         }
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void addBalance(Long userId, BigDecimal amount) {
         playerRepository.addBalance(userId, amount);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void freezeBalance(Long userId, BigDecimal amount) {
         int updated = playerRepository.freezeBalance(userId, amount);
         if (updated == 0) {
@@ -102,7 +107,7 @@ public class PlayerService {
         }
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void unfreezeBalance(Long userId, BigDecimal amount) {
         int updated = playerRepository.unfreezeBalance(userId, amount);
         if (updated == 0) {
@@ -110,7 +115,7 @@ public class PlayerService {
         }
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void returnFrozenBalance(Long userId, BigDecimal amount) {
         int updated = playerRepository.returnFrozenBalance(userId, amount);
         if (updated == 0) {

@@ -84,7 +84,7 @@ public class GameEngineService {
     /**
      * Start automatic number calling for a game
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void startCalling(Long gameId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -248,7 +248,7 @@ public class GameEngineService {
     /**
      * Wrapper method for calling next number (compatible with AdminBotHandler)
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public Integer callNumber(Long gameId) {
         return callNextNumber(gameId);
     }
@@ -299,7 +299,7 @@ public class GameEngineService {
     /**
      * Call a specific number (manual override)
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public Integer callSpecificNumber(Long gameId, Integer number) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -341,7 +341,7 @@ public class GameEngineService {
      * Claim Bingo for a player — allows multiple simultaneous claims.
      * Invalid claims result in an immediate ban from the game (game continues).
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public BingoClaimResult claimBingo(Long gameId, Long playerId) throws JsonProcessingException {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -433,7 +433,7 @@ public class GameEngineService {
     /**
      * Approve a pending Bingo claim — pays the winner, allows up to MAX_WINNERS per game
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public BingoClaimResult approveClaim(Long gameId, Long claimId, Long adminId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -542,7 +542,7 @@ public class GameEngineService {
     /**
      * Reject a pending Bingo claim — game resumes only when no claims remain
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectClaim(Long gameId, Long claimId, Long adminId, String reason) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -588,7 +588,7 @@ public class GameEngineService {
     /**
      * End game without a winner (force end or no claims)
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void endGameWithoutWinner(Long gameId, String reason) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -729,7 +729,7 @@ public class GameEngineService {
     /**
      * Get current game state for a player
      */
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public GameState getGameState(Long gameId, Long playerId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -763,7 +763,7 @@ public class GameEngineService {
     /**
      * Get admin game state (game metadata + called numbers + player count)
      */
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public AdminGameState getAdminGameState(Long gameId) {
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
@@ -791,7 +791,7 @@ public class GameEngineService {
     /**
      * Get all called numbers for a game
      */
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<Integer> getCalledNumbers(Long gameId) {
         return calledNumberRepository.findCalledNumbersByGameId(gameId);
     }
@@ -799,7 +799,7 @@ public class GameEngineService {
     /**
      * Check if a number has been called
      */
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public boolean isNumberCalled(Long gameId, Integer number) {
         return calledNumberRepository.existsByGameIdAndNumberAndCalledAtIsNotNull(gameId, number);
     }
@@ -827,7 +827,7 @@ public class GameEngineService {
     /**
      * Get all pending (unresolved) valid claims for a game
      */
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<BingoClaimResponse> getPendingClaims(Long gameId) {
         return bingoClaimRepository
                 .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID")

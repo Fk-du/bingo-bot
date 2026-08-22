@@ -1,5 +1,6 @@
 package com.bingo.app.tenant.service;
 
+import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.master.entity.AdminFundRequest;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.FundStatus;
@@ -48,7 +49,7 @@ public class WalletService {
     // PLAYER METHODS
     // =========================================================
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public CoinRequestResponse buyPoints(Long playerId, BigDecimal amount, String screenshotUrl) {
         playerService.findByUserId(playerId);
 
@@ -73,7 +74,7 @@ public class WalletService {
         return tenantMapper.toDto(saved);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public WithdrawalResponse createWithdrawRequest(Long playerId, BigDecimal amount, String payoutDetails) {
         Player player = playerRepository.findByUserId(playerId)
                 .orElseThrow(() -> new RuntimeException("Player not found"));
@@ -106,14 +107,14 @@ public class WalletService {
         return tenantMapper.toDto(saved);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<TransactionResponse> getHistory(Long playerId) {
         return transactionRepository.findByUserIdOrderByCreatedAtDesc(playerId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public BigDecimal getBalance(Long playerId) {
         return playerService.getBalance(playerId);
     }
@@ -122,7 +123,7 @@ public class WalletService {
     // ADMIN METHODS
     // =========================================================
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void fundPlayer(Long adminUserId, Long playerId, BigDecimal amount) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
@@ -155,7 +156,7 @@ public class WalletService {
         log.info("Admin {} funded player {} with amount {}", adminUserId, playerId, amount);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<WithdrawalResponse> getPendingWithdrawsForAdminPlayers(Long adminUserId) {
         List<Player> players = playerRepository.findByAdminUserId(adminUserId);
         List<Long> playerIds = players.stream().map(Player::getUserId).toList();
@@ -165,7 +166,7 @@ public class WalletService {
                 .toList();
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void approveWithdrawal(Long withdrawalId, Long approverId) {
         Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
                 .orElseThrow(() -> new RuntimeException("Withdrawal not found"));
@@ -193,7 +194,7 @@ public class WalletService {
         log.info("Withdrawal {} approved by {}", withdrawalId, approverId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectWithdrawal(Long withdrawalId, Long approverId, String reason) {
         Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
                 .orElseThrow(() -> new RuntimeException("Withdrawal not found"));
@@ -226,7 +227,7 @@ public class WalletService {
     // SUPER ADMIN METHODS
     // =========================================================
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void fundAdmin(Long superAdminId, Long adminUserId, BigDecimal amount) {
         User superAdmin = userRepository.findById(superAdminId)
                 .orElseThrow(() -> new RuntimeException("Super admin not found"));
@@ -253,7 +254,7 @@ public class WalletService {
         log.info("Super admin {} funded admin {} with amount {}", superAdminId, adminUserId, amount);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void approveCoinRequest(Long requestId, Long approverId) {
         CoinRequest request = coinRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Coin request not found"));
@@ -265,7 +266,10 @@ public class WalletService {
         User approver = userRepository.findById(approverId)
                 .orElseThrow(() -> new RuntimeException("Approver not found"));
 
-        if (approver.getRole() != Role.SUPER_ADMIN || approver.getBalance().compareTo(request.getAmount()) < 0) {
+        if (approver.getRole() != Role.ADMIN) {
+            throw new RuntimeException("Only admins can approve coin requests");
+        }
+        if (approver.getBalance().compareTo(request.getAmount()) < 0) {
             throw new RuntimeException("Insufficient balance to approve request");
         }
 
@@ -295,7 +299,7 @@ public class WalletService {
         log.info("Coin request {} approved by {} — deducted from approver balance", requestId, approverId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectCoinRequest(Long requestId, Long approverId, String reason) {
         CoinRequest request = coinRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Coin request not found"));
@@ -322,14 +326,14 @@ public class WalletService {
         log.info("Coin request {} rejected by {}: {}", requestId, approverId, reason);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<TransactionResponse> getAllTransactions() {
         return transactionRepository.findAllByOrderByCreatedAtDesc().stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<CoinRequestResponse> getPendingCoinRequestsForAdmin(Long adminUserId) {
         List<Player> players = playerRepository.findByAdminUserId(adminUserId);
         List<Long> playerIds = players.stream().map(Player::getUserId).toList();
@@ -339,11 +343,18 @@ public class WalletService {
                 .toList();
     }
 
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public List<CoinRequestResponse> getCoinRequestsByUser(Long userId) {
+        return coinRequestRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
+    }
+
     // =========================================================
     // ADMIN FUND REQUEST METHODS (Admin → Super Admin)
     // =========================================================
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public AdminFundRequest requestAdminFund(Long adminUserId, BigDecimal amount, String screenshotUrl) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
@@ -370,7 +381,8 @@ public class WalletService {
         return saved;
     }
 
-    @Transactional
+    // Not transactional as a whole: the request/admin live in the master DB while the
+    // ledger lives in the agent's tenant DB, and the two cannot share one transaction.
     public void approveAdminFundRequest(Long requestId, Long superAdminId) {
         User superAdmin = userRepository.findById(superAdminId)
                 .orElseThrow(() -> new RuntimeException("Super admin not found"));
@@ -397,16 +409,32 @@ public class WalletService {
         request.setApprovedAt(LocalDateTime.now());
         adminFundRequestRepository.save(request);
 
-        createTransaction(superAdminId, TransactionType.FUND_SUPER_ADMIN_TO_AGENT, request.getAmount(),
-                TransactionStatus.COMPLETED, requestId, "Approved fund request for admin " + request.getAdminUserId());
-        createTransaction(request.getAdminUserId(), TransactionType.DEPOSIT, request.getAmount(),
-                TransactionStatus.COMPLETED, requestId, "Fund request approved by super admin");
+        recordTenantLedger(request.getAdminUserId(), admin.getId(), TransactionType.FUND_SUPER_ADMIN_TO_AGENT,
+                request.getAmount(), requestId, "Approved fund request for admin " + request.getAdminUserId());
+        recordTenantLedger(request.getAdminUserId(), request.getAdminUserId(), TransactionType.DEPOSIT,
+                request.getAmount(), requestId, "Fund request approved by super admin");
 
         log.info("Admin fund request {} approved by super admin {} — admin {} funded with {}",
                 requestId, superAdminId, request.getAdminUserId(), request.getAmount());
     }
 
-    @Transactional
+    /**
+     * Writes a ledger row into the owning agent's tenant DB. Best-effort: funding must
+     * not fail (or roll back) just because the audit ledger write fails.
+     */
+    private void recordTenantLedger(Long adminUserId, Long userId, TransactionType type, BigDecimal amount,
+                                    Long referenceId, String description) {
+        try {
+            TenantContext.setTenant(TenantContext.tenantKeyForAdmin(adminUserId));
+            createTransaction(userId, type, amount, TransactionStatus.COMPLETED, referenceId, description);
+        } catch (Exception e) {
+            log.error("Failed to record {} ledger entry for user {} in tenant DB", type, userId, e);
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectAdminFundRequest(Long requestId, Long superAdminId, String reason) {
         AdminFundRequest request = adminFundRequestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Fund request not found"));
@@ -424,12 +452,12 @@ public class WalletService {
         log.info("Admin fund request {} rejected by super admin {}: {}", requestId, superAdminId, reason);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<AdminFundRequest> getPendingAdminFundRequests() {
         return adminFundRequestRepository.findByStatusOrderByCreatedAtDesc(FundStatus.PENDING);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<AdminFundRequest> getAdminFundRequestsByAdmin(Long adminUserId) {
         return adminFundRequestRepository.findByAdminUserIdOrderByCreatedAtDesc(adminUserId);
     }
@@ -438,7 +466,7 @@ public class WalletService {
     // GAME RELATED METHODS
     // =========================================================
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void deductBet(Long playerId, BigDecimal amount, Long gameId) {
         playerService.deductBalance(playerId, amount);
 
@@ -446,7 +474,7 @@ public class WalletService {
                 TransactionStatus.COMPLETED, gameId, "Bet placed for game " + gameId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void creditWinnings(Long playerId, BigDecimal amount, Long gameId) {
         playerService.addBalance(playerId, amount);
 
@@ -454,7 +482,7 @@ public class WalletService {
                 TransactionStatus.COMPLETED, gameId, "Won from game " + gameId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void refundPlayer(Long playerId, BigDecimal amount, Long gameId) {
         playerService.addBalance(playerId, amount);
 
@@ -462,7 +490,7 @@ public class WalletService {
                 TransactionStatus.COMPLETED, gameId, "Entry fee refund for ended game " + gameId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void creditAgentCommission(Long adminUserId, BigDecimal amount, Long gameId) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));
@@ -474,7 +502,7 @@ public class WalletService {
                 TransactionStatus.COMPLETED, gameId, "Agent commission from game " + gameId);
     }
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void deductPlatformFee(Long adminUserId, BigDecimal amount, Long gameId) {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> new RuntimeException("Admin not found"));

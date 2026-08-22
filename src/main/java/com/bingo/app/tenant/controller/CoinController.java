@@ -32,17 +32,11 @@ public class CoinController {
     @GetMapping("/requests")
     public ApiResponse<List<CoinRequestResponse>> listRequests(@AuthenticationPrincipal UserPrincipal principal) {
         var user = principal.getUser();
-        switch (user.getRole()) {
-            case ADMIN -> {
-                return ApiResponse.ok(walletService.getPendingCoinRequestsForAdmin(user.getId()));
-            }
-            case SUPER_ADMIN -> {
-                return ApiResponse.ok(List.of());
-            }
-            default -> {
-                return ApiResponse.ok(List.of());
-            }
-        }
+        return switch (user.getRole()) {
+            case ADMIN -> ApiResponse.ok(walletService.getPendingCoinRequestsForAdmin(user.getId()));
+            case PLAYER -> ApiResponse.ok(walletService.getCoinRequestsByUser(user.getId()));
+            case SUPER_ADMIN -> ApiResponse.ok(List.of());
+        };
     }
 
     @PatchMapping("/requests/{id}")

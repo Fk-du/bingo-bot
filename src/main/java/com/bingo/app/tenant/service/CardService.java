@@ -54,7 +54,7 @@ public class CardService {
     /**
      * Generate a unique Bingo card
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public CardResponse generateUniqueCard() {
         int maxAttempts = 100;
 
@@ -82,7 +82,7 @@ public class CardService {
     /**
      * Generate a pool of unique cards
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void generateCardPool(int count) {
         log.info("Generating {} unique cards", count);
         int generated = 0;
@@ -137,7 +137,7 @@ public class CardService {
     /**
      * Assign a card to a player for a specific game
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public GameCardResponse assignCard(Long gameId, Long playerId) {
         // Validate game exists and is in registration phase
         Game game = gameRepository.findById(gameId)
@@ -198,7 +198,7 @@ public class CardService {
     /**
      * Assign a new card to a player (for ongoing use)
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public PlayerCardResponse assignNewCardToPlayer(Long playerId) {
         return tenantMapper.toDto(assignNewCardToPlayerEntity(playerId));
     }
@@ -237,7 +237,7 @@ public class CardService {
     /**
      * Mark card as winner
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void markCardAsWinner(Long gameId, Long playerId) {
         GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
                 .orElseThrow(() -> new RuntimeException("Game card not found"));
@@ -300,7 +300,7 @@ public class CardService {
     /**
      * Unassign a card from a player
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void unassignPlayerCard(Long playerId) {
         PlayerCard playerCard = playerCardRepository
                 .findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
@@ -319,7 +319,7 @@ public class CardService {
     /**
      * Lock player's card for active game
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void lockPlayerCard(Long playerId) {
         playerCardRepository.lockPlayerCard(playerId);
     }
@@ -327,7 +327,7 @@ public class CardService {
     /**
      * Unlock player's card after game
      */
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void unlockPlayerCard(Long playerId) {
         playerCardRepository.unlockPlayerCard(playerId);
     }

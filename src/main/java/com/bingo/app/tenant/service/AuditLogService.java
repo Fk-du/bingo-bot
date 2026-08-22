@@ -20,7 +20,7 @@ public class AuditLogService {
     private final AuditLogRepository auditLogRepository;
     private final TenantMapper tenantMapper;
 
-    @Transactional
+    @Transactional(transactionManager = "tenantTransactionManager")
     public void record(Long userId, String action, String details, String ipAddress) {
         try {
             auditLogRepository.save(AuditLog.builder()
@@ -35,14 +35,14 @@ public class AuditLogService {
         }
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<AuditLogResponse> getByUserId(Long userId) {
         return auditLogRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<AuditLogResponse> getByAction(String action) {
         return auditLogRepository.findByActionOrderByCreatedAtDesc(action).stream()
                 .map(tenantMapper::toDto)

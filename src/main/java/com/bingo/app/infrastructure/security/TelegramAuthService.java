@@ -51,7 +51,7 @@ public class TelegramAuthService {
                     bingoTelegramBot.getBotId()
             );
 
-            if (!verifySignature(rawParams)) {
+            if (!verifySignature(params)) {
                 log.warn("Invalid Telegram signature");
                 return null;
             }
@@ -115,12 +115,13 @@ public class TelegramAuthService {
     private boolean verifySignature(Map<String, String> params) {
         String signatureValue = params.get("signature");
         String hash = params.remove("hash");
-        params.remove("signature");
         if (hash == null) {
             return verifyTelegramSignature(params, signatureValue);
         }
 
-        String checkString = buildDataCheckString(params, null);
+        // Telegram signs the URL-DECODED values; only the "hash" field itself is excluded
+        // from the data-check-string (the "signature" field, when present, IS included).
+        String checkString = buildDataCheckString(params, false);
         String configuredBotToken = botToken == null ? "" : botToken.trim();
 
         if (configuredBotToken.isEmpty()) {
@@ -128,14 +129,14 @@ public class TelegramAuthService {
         }
 
         try {
-            // Step 1: secret_key = HMAC-SHA256(key=bot_token, data="WebAppData")
-            SecretKeySpec botTokenKey = new SecretKeySpec(
-                    configuredBotToken.getBytes(StandardCharsets.UTF_8),
+            // Step 1: secret_key = HMAC-SHA256(key="WebAppData", data=bot_token)
+            SecretKeySpec webAppDataKey = new SecretKeySpec(
+                    "WebAppData".getBytes(StandardCharsets.UTF_8),
                     "HmacSHA256"
             );
             Mac innerMac = Mac.getInstance("HmacSHA256");
-            innerMac.init(botTokenKey);
-            byte[] secretKeyBytes = innerMac.doFinal("WebAppData".getBytes(StandardCharsets.UTF_8));
+            innerMac.init(webAppDataKey);
+            byte[] secretKeyBytes = innerMac.doFinal(configuredBotToken.getBytes(StandardCharsets.UTF_8));
 
             // Step 2: signature = HMAC-SHA256(key=secret_key, data=data_check_string)
             SecretKeySpec secretKey = new SecretKeySpec(secretKeyBytes, "HmacSHA256");
@@ -174,7 +175,7 @@ public class TelegramAuthService {
         }
 
         try {
-            String dataCheckString = buildDataCheckString(params, botId);
+            String dataCheckString = botId + ":WebAppData\n" + buildDataCheckString(params, true);
 
             byte[] publicKey = HexFormat.of().parseHex("e7bf03a2fa4602af4580703d88dda5bb59f32ed8b02a56c187fe7d34caed242d");
             Signature signature = Signature.getInstance("Ed25519");
@@ -190,17 +191,20 @@ public class TelegramAuthService {
         }
     }
 
-    private String buildDataCheckString(Map<String, String> params, Long botId) {
-        String body = params.entrySet().stream()
-                .filter(entry -> !"hash".equals(entry.getKey()) && !"signature".equals(entry.getKey()))
+    /**
+     * Builds the sorted "key=value" data-check-string from URL-decoded params.
+     *
+     * @param excludeSignature whether to drop the "signature" field (required for the
+     *                         Ed25519 third-party validation; the HMAC hash validation
+     *                         keeps it, excluding only "hash")
+     */
+    private String buildDataCheckString(Map<String, String> params, boolean excludeSignature) {
+        return params.entrySet().stream()
+                .filter(entry -> !"hash".equals(entry.getKey()))
+                .filter(entry -> !(excludeSignature && "signature".equals(entry.getKey())))
                 .sorted(Map.Entry.comparingByKey())
                 .map(entry -> entry.getKey() + "=" + entry.getValue())
                 .collect(Collectors.joining("\n"));
-
-        if (botId == null) {
-            return body;
-        }
-        return botId + ":WebAppData\n" + body;
     }
 
     private byte[] encodeEd25519PublicKey(byte[] rawPublicKey) {

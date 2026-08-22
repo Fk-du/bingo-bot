@@ -32,3 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 .env
+
+### Runtime data ###
+data/
+app.log
+app.err
