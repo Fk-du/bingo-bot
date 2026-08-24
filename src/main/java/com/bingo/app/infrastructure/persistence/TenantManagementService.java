@@ -24,7 +24,13 @@ public class TenantManagementService {
 
     private static final List<String> TENANT_SQL_SCRIPTS = List.of(
             "db/migration/V1__initial_tenant_schema.sql",
-            "db/migration/V2__add_player_balance.sql"
+            "db/migration/V2__add_player_balance.sql",
+            "db/migration/V3__add_game_card_banned.sql",
+            "db/migration/V4__add_withdrawal_rejection_reason.sql",
+            "db/migration/V5__add_bingo_claim_validated_by.sql",
+            "db/migration/V6__add_bingo_claim_rejection_reason.sql",
+            "db/migration/V7__add_game_commission_percent.sql",
+            "db/migration/V8__add_game_fairness_hash.sql"
     );
 
     private final TenantRegistryRepository tenantRegistryRepository;

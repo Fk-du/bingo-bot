@@ -30,7 +30,7 @@ public interface PlayerRepository extends JpaRepository<Player, Long> {
 
     @Modifying
     @Query("UPDATE Player p SET p.balance = p.balance + :amount WHERE p.userId = :userId")
-    void addBalance(@Param("userId") Long userId, @Param("amount") BigDecimal amount);
+    int addBalance(@Param("userId") Long userId, @Param("amount") BigDecimal amount);
 
     @Modifying
     @Query("UPDATE Player p SET p.balance = p.balance - :amount, p.frozenBalance = p.frozenBalance + :amount WHERE p.userId = :userId AND p.balance >= :amount")

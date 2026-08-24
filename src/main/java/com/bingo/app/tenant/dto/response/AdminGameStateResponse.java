@@ -18,6 +18,7 @@ public record AdminGameStateResponse(
         BigDecimal prizePool,
         String winningPattern,
         Integer callInterval,
+        BigDecimal commissionPercent,
         LocalDateTime startTime,
         LocalDateTime endTime,
         LocalDateTime createdAt,

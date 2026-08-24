@@ -5,7 +5,7 @@ import lombok.Builder;
 
 import java.math.BigDecimal;
 
-@Builder
+@Builder(toBuilder = true)
 public record UserProfileResponse(
         Long id,
         Long telegramId,

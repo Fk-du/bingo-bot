@@ -96,7 +96,10 @@ public class PlayerService {
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public void addBalance(Long userId, BigDecimal amount) {
-        playerRepository.addBalance(userId, amount);
+        int updated = playerRepository.addBalance(userId, amount);
+        if (updated == 0) {
+            throw new RuntimeException("Player not found for user: " + userId);
+        }
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")

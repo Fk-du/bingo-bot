@@ -1,11 +1,11 @@
 package com.bingo.app.master.controller;
 
 import com.bingo.app.infrastructure.security.TelegramAuthService;
-import com.bingo.app.master.dto.mapper.MasterMapper;
 import com.bingo.app.master.dto.request.LoginRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.master.dto.response.UserProfileResponse;
 import com.bingo.app.master.entity.User;
+import com.bingo.app.master.service.UserProfileService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final TelegramAuthService telegramAuthService;
-    private final MasterMapper masterMapper;
+    private final UserProfileService userProfileService;
 
     @PostMapping("/login")
     public ApiResponse<UserProfileResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -27,6 +27,6 @@ public class AuthController {
         if (user == null) {
             return ApiResponse.error("Authentication failed");
         }
-        return ApiResponse.ok("Authenticated", masterMapper.toUserProfile(user));
+        return ApiResponse.ok("Authenticated", userProfileService.buildProfile(user));
     }
 }

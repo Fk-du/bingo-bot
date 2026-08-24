@@ -31,12 +31,6 @@ public class ConfigService {
     @Value("${bingo.auto-call-interval-ms:5000}")
     private int defaultAutoCallInterval;
 
-    @Value("${bingo.fees.platform-fee-rate:0.10}")
-    private double defaultPlatformFeeRate;
-
-    @Value("${bingo.fees.agent-commission-rate:0.05}")
-    private double defaultAgentCommissionRate;
-
     @Value("${app.game.default-entry-fee:10}")
     private int defaultEntryFee;
 
@@ -51,8 +45,6 @@ public class ConfigService {
                     "cardSize", String.valueOf(defaultCardSize),
                     "numberRange", String.valueOf(defaultNumberRange),
                     "autoCallInterval", String.valueOf(defaultAutoCallInterval),
-                    "platformFeeRate", String.valueOf(defaultPlatformFeeRate),
-                    "agentCommissionRate", String.valueOf(defaultAgentCommissionRate),
                     "entryFee", String.valueOf(defaultEntryFee),
                     "maxPlayers", String.valueOf(defaultMaxPlayers)
             );
@@ -103,8 +95,6 @@ public class ConfigService {
                 "cardSize", defaultCardSize,
                 "numberRange", defaultNumberRange,
                 "autoCallInterval", defaultAutoCallInterval,
-                "platformFeeRate", defaultPlatformFeeRate,
-                "agentCommissionRate", defaultAgentCommissionRate,
                 "entryFee", defaultEntryFee,
                 "maxPlayers", defaultMaxPlayers
         );

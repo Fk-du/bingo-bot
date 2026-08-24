@@ -43,6 +43,10 @@ public class Game {
     private String winningPattern;
     @Column(name = "call_interval")
     private Integer callInterval;
+    @Column(name = "commission_percent")
+    private BigDecimal commissionPercent = new BigDecimal("10.00");
+    @Column(name = "fairness_hash")
+    private String fairnessHash;
     @Column(name = "start_time")
     private LocalDateTime startTime;
     @Column(name = "end_time")

@@ -49,6 +49,12 @@ public class GameController {
         return ApiResponse.ok(tenantMapper.toGameStateDto(state));
     }
 
+    @GetMapping("/{id}/fairness")
+    @PreAuthorize("hasAnyRole('PLAYER', 'ADMIN')")
+    public ApiResponse<?> getFairnessProof(@PathVariable Long id) {
+        return ApiResponse.ok(gameService.getFairnessProof(id));
+    }
+
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<GameResponse> createGame(
@@ -65,7 +71,7 @@ public class GameController {
             @PathVariable Long id,
             @Valid @RequestBody GameSettingsUpdateRequest request) {
         var game = gameService.updateGameSettings(id, principal.getUser().getId(),
-                request.maxPlayers(), request.callInterval(), request.winningPattern());
+                request.maxPlayers(), request.callInterval(), request.winningPattern(), request.commissionPercent());
         return ApiResponse.ok("Game settings updated", game);
     }
 
@@ -107,8 +113,8 @@ public class GameController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id) {
         var game = gameService.startGameForAdmin(principal.getUser().getId(), id);
-        gameEngineService.startCalling(game.id());
-        return ApiResponse.ok("Game started", game);
+        gameEngineService.scheduleGameStart(game.id(), 5);
+        return ApiResponse.ok("Game starting", game);
     }
 
     @PostMapping("/{id}/cancel")
@@ -154,7 +160,7 @@ public class GameController {
             case PLAYER -> {
                 Long adminUserId = AdminIds.adminUserId(user);
                 if (adminUserId == null) return ApiResponse.ok(List.of());
-                var game = gameService.findCurrentGameForAdmin(adminUserId);
+                var game = gameService.findCurrentGameForPlayer(adminUserId, user.getId());
                 return ApiResponse.ok(game.map(List::of).orElse(List.of()));
             }
             default -> {
@@ -194,8 +200,7 @@ public class GameController {
                 .claimId(result.getClaimId())
                 .pendingReview(result.isPendingReview())
                 .rewardAmount(result.getRewardAmount())
-                .platformFee(result.getPlatformFee())
-                .agentCommission(result.getAgentCommission())
+                .commission(result.getCommission())
                 .banned(result.isBanned())
                 .build());
     }
@@ -223,8 +228,7 @@ public class GameController {
                 .gameEnded(result.isGameEnded())
                 .approvedCount(result.getApprovedCount())
                 .rewardAmount(result.getRewardAmount())
-                .platformFee(result.getPlatformFee())
-                .agentCommission(result.getAgentCommission())
+                .commission(result.getCommission())
                 .build());
     }
 

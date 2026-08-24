@@ -24,6 +24,7 @@ public class TenantMapper {
                 .prizePool(game.getPrizePool())
                 .winningPattern(game.getWinningPattern())
                 .callInterval(game.getCallInterval())
+                .commissionPercent(game.getCommissionPercent())
                 .startTime(game.getStartTime())
                 .endTime(game.getEndTime())
                 .createdAt(game.getCreatedAt())
@@ -180,11 +181,14 @@ public class TenantMapper {
                 .totalNumbersCalled(state.getTotalNumbersCalled())
                 .calledNumbers(state.getCalledNumbers())
                 .calledNumbersLabeled(labeled)
+                .winningPattern(state.getWinningPattern())
+                .fairnessHash(state.getFairnessHash())
                 .prizePool(state.getPrizePool())
                 .playerCard(state.getPlayerCard())
                 .hasPlayerCard(state.isHasPlayerCard())
                 .isWinner(state.isWinner())
                 .isBanned(state.isBanned())
+                .startTime(state.getStartTime())
                 .build();
     }
 
@@ -204,6 +208,7 @@ public class TenantMapper {
                 .prizePool(game.getPrizePool())
                 .winningPattern(game.getWinningPattern())
                 .callInterval(game.getCallInterval())
+                .commissionPercent(game.getCommissionPercent())
                 .startTime(game.getStartTime())
                 .endTime(game.getEndTime())
                 .createdAt(game.getCreatedAt())

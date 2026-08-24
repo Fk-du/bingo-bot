@@ -4,6 +4,8 @@ import com.bingo.app.master.exception.InviteRegistrationException;
 import com.bingo.app.tenant.exception.GameCreationException;
 import com.bingo.app.tenant.exception.GameProgressException;
 import com.bingo.app.tenant.exception.PlayerActionException;
+import com.bingo.app.tenant.exception.RequestAlreadyProcessedException;
+import com.bingo.app.tenant.exception.WalletException;
 import com.bingo.app.infrastructure.security.TelegramAuthException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +25,16 @@ public class ApiExceptionHandler {
             PlayerActionException.class
     })
     public ResponseEntity<Map<String, Object>> handleDomainException(RuntimeException ex) {
+        return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), userMessage(ex));
+    }
+
+    @ExceptionHandler(RequestAlreadyProcessedException.class)
+    public ResponseEntity<Map<String, Object>> handleRequestAlreadyProcessed(RuntimeException ex) {
+        return buildResponse(HttpStatus.CONFLICT, ex.getMessage(), userMessage(ex));
+    }
+
+    @ExceptionHandler(WalletException.class)
+    public ResponseEntity<Map<String, Object>> handleWalletException(RuntimeException ex) {
         return buildResponse(HttpStatus.BAD_REQUEST, ex.getMessage(), userMessage(ex));
     }
 
@@ -51,6 +63,9 @@ public class ApiExceptionHandler {
         }
         if (ex instanceof PlayerActionException playerActionException) {
             return playerActionException.getUserMessage();
+        }
+        if (ex instanceof WalletException walletException) {
+            return walletException.getUserMessage();
         }
         return ex.getMessage();
     }

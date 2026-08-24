@@ -6,7 +6,7 @@ import lombok.Builder;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Builder
+@Builder(toBuilder = true)
 public record GameResponse(
         Long id,
         Long adminUserId,
@@ -18,7 +18,9 @@ public record GameResponse(
         BigDecimal prizePool,
         String winningPattern,
         Integer callInterval,
+        BigDecimal commissionPercent,
         LocalDateTime startTime,
         LocalDateTime endTime,
-        LocalDateTime createdAt
+        LocalDateTime createdAt,
+        Boolean registered
 ) {}

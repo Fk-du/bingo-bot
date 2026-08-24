@@ -11,6 +11,7 @@ import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.sql.DataSource;
 import java.util.HashMap;
@@ -70,5 +71,11 @@ public class TenantDatabaseConfig {
     public PlatformTransactionManager tenantTransactionManager(
             @Qualifier("tenantEntityManagerFactory") LocalContainerEntityManagerFactoryBean entityManagerFactory) {
         return new JpaTransactionManager(entityManagerFactory.getObject());
+    }
+
+    @Bean(name = "tenantTransactionTemplate")
+    public TransactionTemplate tenantTransactionTemplate(
+            @Qualifier("tenantTransactionManager") PlatformTransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
     }
 }

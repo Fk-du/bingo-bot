@@ -1,0 +1,1 @@
+ALTER TABLE bingo_claims ADD COLUMN IF NOT EXISTS validated_by BIGINT;

@@ -10,6 +10,7 @@ import com.bingo.app.tenant.entity.Transaction;
 import com.bingo.app.tenant.enums.GameStatus;
 import com.bingo.app.tenant.enums.TransactionStatus;
 import com.bingo.app.tenant.enums.TransactionType;
+import com.bingo.app.tenant.exception.GameProgressException;
 import com.bingo.app.tenant.repository.CalledNumberRepository;
 import com.bingo.app.tenant.repository.GameCardRepository;
 import com.bingo.app.tenant.repository.GameRepository;
@@ -23,6 +24,7 @@ import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -42,7 +44,8 @@ public class GameService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse createGameWithEntryFee(Long adminUserId, CreateGameRequest request) {
         if (gameRepository.hasActiveGame(adminUserId)) {
-            throw new RuntimeException("Admin already has an active game");
+            throw new GameProgressException("Admin already has an active game",
+                    "You already have an active game. Finish it before creating a new one.");
         }
 
         Game game = Game.builder()
@@ -53,8 +56,9 @@ public class GameService {
                 .currentCallIndex(0)
                 .totalNumbersCalled(0)
                 .prizePool(BigDecimal.ZERO)
-                .winningPattern(request.getWinningPattern() != null ? request.getWinningPattern() : "SINGLE_LINE")
+                .winningPattern(normalizePattern(request.getWinningPattern()))
                 .callInterval(request.getCallInterval() != null ? request.getCallInterval() : 5)
+                .commissionPercent(request.getCommissionPercent() != null ? request.getCommissionPercent() : new BigDecimal("10.00"))
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -78,33 +82,53 @@ public class GameService {
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public Optional<GameResponse> findCurrentGameForAdmin(Long adminUserId) {
         return gameRepository.findByAdminUserIdAndStatusIn(adminUserId,
-                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.IN_PROGRESS, GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
+                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.STARTING, GameStatus.IN_PROGRESS,
+                        GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
                 .map(tenantMapper::toDto);
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public Optional<GameResponse> findCurrentGameForPlayer(Long adminUserId, Long playerId) {
+        return findCurrentGameForAdmin(adminUserId)
+                .map(game -> game.toBuilder()
+                        .registered(gameCardRepository.existsByGameIdAndPlayerId(game.id(), playerId))
+                        .build());
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse startGameForAdmin(Long adminUserId, Long gameId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+                .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
 
         if (!game.getAdminUserId().equals(adminUserId)) {
-            throw new RuntimeException("Game does not belong to this admin");
+            throw new GameProgressException("Game does not belong to this admin",
+                    "This game does not belong to you.");
         }
 
         if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
-            throw new RuntimeException("Game cannot be started. Current status: " + game.getStatus());
+            throw new GameProgressException("Game cannot be started. Current status: " + game.getStatus(),
+                    "This game can no longer be started.");
         }
 
         long playerCount = gameCardRepository.countByGameId(gameId);
         if (playerCount < 2) {
-            throw new RuntimeException("Game needs at least 2 players to start. Currently: " + playerCount);
+            throw new GameProgressException(
+                    "Game needs at least 2 players to start. Currently: " + playerCount,
+                    "At least 2 registered players are needed to start. Currently: " + playerCount);
         }
 
         List<Integer> sequence = generateSealedNumberSequence();
         saveNumberSequence(gameId, sequence);
+        // Commit to the exact call order BEFORE any number is revealed — players
+        // can later verify the game against this hash (commit-reveal fairness).
+        game.setFairnessHash(sha256Hex(sequence.stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(","))));
 
-        game.setStatus(GameStatus.IN_PROGRESS);
-        game.setStartTime(LocalDateTime.now());
+        // Enter STARTING state; startTime is the countdown target. The engine
+        // flips the game to IN_PROGRESS and begins calling once it elapses.
+        game.setStatus(GameStatus.STARTING);
+        game.setStartTime(LocalDateTime.now().plusSeconds(5));
         game.setCurrentCallIndex(0);
         game.setTotalNumbersCalled(0);
 
@@ -116,14 +140,16 @@ public class GameService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public void cancelGame(Long gameId, Long adminUserId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+                .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
 
         if (!game.getAdminUserId().equals(adminUserId)) {
-            throw new RuntimeException("Game does not belong to this admin");
+            throw new GameProgressException("Game does not belong to this admin",
+                    "This game does not belong to you.");
         }
 
         if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
-            throw new RuntimeException("Can only cancel a game that hasn't started yet");
+            throw new GameProgressException("Can only cancel a game that hasn't started yet",
+                    "Only games that haven't started can be cancelled.");
         }
 
         refundPlayersForGame(gameId, game.getEntryFee());
@@ -138,14 +164,15 @@ public class GameService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public GameResponse endGameManually(Long gameId, Long adminUserId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+                .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
 
         if (!game.getAdminUserId().equals(adminUserId)) {
-            throw new RuntimeException("Game does not belong to this admin");
+            throw new GameProgressException("Game does not belong to this admin",
+                    "This game does not belong to you.");
         }
 
         if (game.getStatus() == GameStatus.ENDED) {
-            throw new RuntimeException("Game already ended");
+            throw new GameProgressException("Game already ended", "This game has already ended.");
         }
 
         refundNonWinnersForGame(gameId, game.getEntryFee());
@@ -198,16 +225,18 @@ public class GameService {
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
-    public GameResponse updateGameSettings(Long gameId, Long adminUserId, Integer maxPlayers, Integer callInterval, String winningPattern) {
+    public GameResponse updateGameSettings(Long gameId, Long adminUserId, Integer maxPlayers, Integer callInterval, String winningPattern, java.math.BigDecimal commissionPercent) {
         Game game = gameRepository.findByIdForUpdate(gameId)
-                .orElseThrow(() -> new RuntimeException("Game not found"));
+                .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
 
         if (!game.getAdminUserId().equals(adminUserId)) {
-            throw new RuntimeException("Game does not belong to this admin");
+            throw new GameProgressException("Game does not belong to this admin",
+                    "This game does not belong to you.");
         }
 
         if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
-            throw new RuntimeException("Cannot update game that has already started");
+            throw new GameProgressException("Cannot update game that has already started",
+                    "Game settings can only be changed before the game starts.");
         }
 
         if (maxPlayers != null) {
@@ -217,10 +246,70 @@ public class GameService {
             game.setCallInterval(callInterval);
         }
         if (winningPattern != null) {
-            game.setWinningPattern(winningPattern);
+            game.setWinningPattern(normalizePattern(winningPattern));
+        }
+        if (commissionPercent != null) {
+            if (commissionPercent.compareTo(java.math.BigDecimal.ZERO) < 0
+                    || commissionPercent.compareTo(new java.math.BigDecimal("90")) > 0) {
+                throw new GameProgressException("Invalid commission",
+                        "Commission must be between 0% and 90%.");
+            }
+            game.setCommissionPercent(commissionPercent);
         }
 
         return tenantMapper.toDto(gameRepository.save(game));
+    }
+
+    /**
+     * Commit-reveal fair-play data. The hash is published before the first call;
+     * the sealed sequence is only revealed once the game is over.
+     */
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public com.bingo.app.tenant.dto.response.FairnessResponse getFairnessProof(Long gameId) {
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
+        boolean over = game.getStatus() == GameStatus.ENDED;
+        List<Integer> sequence = calledNumberRepository.findAllByGameIdOrderBySequenceIndex(gameId)
+                .stream().map(cn -> cn.getNumber()).toList();
+        String recomputed = sha256Hex(sequence.stream().map(String::valueOf).collect(Collectors.joining(",")));
+        long calledCount = calledNumberRepository.findAllByGameIdOrderBySequenceIndex(gameId)
+                .stream().filter(cn -> cn.isCalled()).count();
+        return com.bingo.app.tenant.dto.response.FairnessResponse.builder()
+                .gameId(gameId)
+                .status(game.getStatus())
+                .algorithm("SHA-256 of the 75 called numbers joined by commas, in call order")
+                .fairnessHash(game.getFairnessHash())
+                .revealed(over)
+                .sequence(over ? sequence : null)
+                .sequenceIntact(recomputed.equals(game.getFairnessHash()))
+                .calledCount((int) calledCount)
+                .totalNumbersCalled(game.getTotalNumbersCalled())
+                .build();
+    }
+
+    private String sha256Hex(String input) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static final Set<String> SUPPORTED_PATTERNS = Set.of(
+            "SINGLE_LINE", "DOUBLE_LINE", "FULL_HOUSE", "BLACKOUT", "FOUR_CORNERS",
+            "X_SHAPE", "L_SHAPE", "T_SHAPE", "POSTAGE_STAMP");
+
+    private String normalizePattern(String pattern) {
+        String value = pattern != null ? pattern : "SINGLE_LINE";
+        if (!SUPPORTED_PATTERNS.contains(value)) {
+            throw new GameProgressException("Unsupported winning pattern: " + value,
+                    "Unknown winning pattern. Pick one from the list.");
+        }
+        return value;
     }
 
     private List<Integer> generateSealedNumberSequence() {

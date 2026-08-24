@@ -7,6 +7,8 @@ import com.bingo.app.tenant.dto.response.PlayerCardResponse;
 import com.bingo.app.tenant.entity.*;
 import com.bingo.app.tenant.enums.AssignmentStatus;
 import com.bingo.app.tenant.enums.GameStatus;
+import com.bingo.app.tenant.exception.PlayerActionException;
+import com.bingo.app.tenant.exception.WalletException;
 import com.bingo.app.tenant.repository.CardRepository;
 import com.bingo.app.tenant.repository.GameCardRepository;
 import com.bingo.app.tenant.repository.GameRepository;
@@ -144,24 +146,28 @@ public class CardService {
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
         if (game.getStatus() != GameStatus.REGISTRATION_OPEN) {
-            throw new RuntimeException("Game is not accepting registrations");
+            throw new PlayerActionException("Game is not accepting registrations",
+                    "This game is no longer accepting registrations.");
         }
 
         // Check if player already has a card for this game
         if (gameCardRepository.existsByGameIdAndPlayerId(gameId, playerId)) {
-            throw new RuntimeException("Player already has a card for this game");
+            throw new PlayerActionException("Player already has a card for this game",
+                    "You are already registered for this game.");
         }
 
         // Enforce: player can only be in ONE active game at a time
         var activeGameCards = gameCardRepository.findByPlayerIdAndActiveGames(playerId);
         if (!activeGameCards.isEmpty()) {
-            throw new RuntimeException("You are already registered for an active game. Finish it before joining another.");
+            throw new PlayerActionException(
+                    "Player already has a card for an active game",
+                    "You are already registered for an active game. Finish it before joining another.");
         }
 
         // Check max players limit
         long currentPlayers = gameCardRepository.countByGameId(gameId);
         if (currentPlayers >= game.getMaxPlayers()) {
-            throw new RuntimeException("Game is full");
+            throw new PlayerActionException("Game is full", "This game is full. Please wait for the next one.");
         }
 
         // Get or create player's assigned card
@@ -179,7 +185,8 @@ public class CardService {
 
         // Deduct entry fee from player balance (records BET transaction)
         if (playerService.getBalance(playerId).compareTo(game.getEntryFee()) < 0) {
-            throw new RuntimeException("Insufficient balance");
+            throw new WalletException("Insufficient balance",
+                    "You don't have enough coins for the entry fee. Please request more coins.");
         }
 
         walletService.deductBet(playerId, game.getEntryFee(), gameId);
@@ -336,7 +343,8 @@ public class CardService {
         // Check if player already has an active card
         playerCardRepository.findByPlayerIdAndStatus(playerId, AssignmentStatus.ACTIVE)
                 .ifPresent(existing -> {
-                    throw new RuntimeException("Player already has an active card");
+                    throw new PlayerActionException("Player already has an active card",
+                            "You already have an active card.");
                 });
 
         // Get an available card

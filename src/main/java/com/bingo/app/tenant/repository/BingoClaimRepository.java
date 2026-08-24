@@ -2,15 +2,24 @@ package com.bingo.app.tenant.repository;
 
 import com.bingo.app.tenant.entity.BingoClaim;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 @Repository
 public interface BingoClaimRepository extends JpaRepository<BingoClaim, Long> {
+
+    @Modifying
+    @Query("UPDATE BingoClaim c SET c.validatedAt = :now, c.validatedBy = :adminId " +
+            "WHERE c.id = :claimId AND c.validatedAt IS NULL")
+    int claimForProcessing(@Param("claimId") Long claimId,
+                           @Param("adminId") Long adminId,
+                           @Param("now") LocalDateTime now);
 
     List<BingoClaim> findByGameIdAndResult(Long gameId, String result);
 

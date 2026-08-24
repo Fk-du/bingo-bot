@@ -4,6 +4,7 @@ import com.bingo.app.tenant.enums.GameStatus;
 import lombok.Builder;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Builder
@@ -14,11 +15,14 @@ public record GameStateResponse(
         Integer totalNumbersCalled,
         List<Integer> calledNumbers,
         List<String> calledNumbersLabeled,
+        String winningPattern,
+        String fairnessHash,
         BigDecimal prizePool,
         int[][] playerCard,
         boolean hasPlayerCard,
         boolean isWinner,
-        boolean isBanned
+        boolean isBanned,
+        LocalDateTime startTime
 ) {
     public static String numberToLabel(Integer number) {
         if (number == null || number < 1 || number > 75) return String.valueOf(number);

@@ -1,6 +1,8 @@
 package com.bingo.app.tenant.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
+import com.bingo.app.tenant.exception.RequestAlreadyProcessedException;
+import com.bingo.app.tenant.exception.WalletException;
 import com.bingo.app.master.entity.AdminFundRequest;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.FundStatus;
@@ -54,7 +56,7 @@ public class WalletService {
         playerService.findByUserId(playerId);
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("Amount must be positive");
+            throw new WalletException("Amount must be positive");
         }
 
         CoinRequest request = CoinRequest.builder()
@@ -77,14 +79,14 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public WithdrawalResponse createWithdrawRequest(Long playerId, BigDecimal amount, String payoutDetails) {
         Player player = playerRepository.findByUserId(playerId)
-                .orElseThrow(() -> new RuntimeException("Player not found"));
+                .orElseThrow(() -> new WalletException("Player not found"));
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("Amount must be positive");
+            throw new WalletException("Amount must be positive");
         }
 
         if (player.getBalance().compareTo(amount) < 0) {
-            throw new RuntimeException("Insufficient balance");
+            throw new WalletException("Insufficient balance");
         }
 
         playerService.freezeBalance(playerId, amount);
@@ -126,27 +128,28 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public void fundPlayer(Long adminUserId, Long playerId, BigDecimal amount) {
         User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
         if (admin.getRole() != Role.ADMIN) {
-            throw new RuntimeException("Only admins can fund players");
+            throw new WalletException("Only admins can fund players");
         }
 
         if (admin.getBalance().compareTo(amount) < 0) {
-            throw new RuntimeException("Insufficient admin balance");
+            throw new WalletException("Insufficient admin balance");
         }
 
         Player player = playerRepository.findByUserId(playerId)
-                .orElseThrow(() -> new RuntimeException("Player not found"));
+                .orElseThrow(() -> new WalletException("Player not found"));
 
         if (!player.getAdminUserId().equals(adminUserId)) {
-            throw new RuntimeException("Player does not belong to this admin");
+            throw new WalletException("Player does not belong to this admin");
         }
+
+        // Tenant DB credit first; master-side deduction last (no cross-DB transaction).
+        playerService.addBalance(playerId, amount);
 
         admin.setBalance(admin.getBalance().subtract(amount));
         userRepository.save(admin);
-
-        playerService.addBalance(playerId, amount);
 
         createTransaction(adminUserId, TransactionType.FUND_AGENT_TO_PLAYER, amount,
                 TransactionStatus.COMPLETED, null, "Funded player " + playerId);
@@ -168,17 +171,14 @@ public class WalletService {
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public void approveWithdrawal(Long withdrawalId, Long approverId) {
-        Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
-                .orElseThrow(() -> new RuntimeException("Withdrawal not found"));
-
-        if (withdrawal.getStatus() != RequestStatus.PENDING) {
-            throw new RuntimeException("Withdrawal already processed");
+        // Atomic claim: a concurrent/double approval can never proceed past this line.
+        if (withdrawalRepository.claimForProcessing(withdrawalId, RequestStatus.APPROVED,
+                RequestStatus.PENDING, approverId, LocalDateTime.now(), null) == 0) {
+            throw new RequestAlreadyProcessedException("Withdrawal already processed");
         }
 
-        withdrawal.setStatus(RequestStatus.APPROVED);
-        withdrawal.setProcessedBy(approverId);
-        withdrawal.setProcessedAt(LocalDateTime.now());
-        withdrawalRepository.save(withdrawal);
+        Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
+                .orElseThrow(() -> new WalletException("Withdrawal not found"));
 
         playerService.unfreezeBalance(withdrawal.getUserId(), withdrawal.getAmount());
 
@@ -196,18 +196,14 @@ public class WalletService {
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectWithdrawal(Long withdrawalId, Long approverId, String reason) {
-        Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
-                .orElseThrow(() -> new RuntimeException("Withdrawal not found"));
-
-        if (withdrawal.getStatus() != RequestStatus.PENDING) {
-            throw new RuntimeException("Withdrawal already processed");
+        // Atomic claim: a concurrent/double rejection can never proceed past this line.
+        if (withdrawalRepository.claimForProcessing(withdrawalId, RequestStatus.REJECTED,
+                RequestStatus.PENDING, approverId, LocalDateTime.now(), reason) == 0) {
+            throw new RequestAlreadyProcessedException("Withdrawal already processed");
         }
 
-        withdrawal.setStatus(RequestStatus.REJECTED);
-        withdrawal.setProcessedBy(approverId);
-        withdrawal.setProcessedAt(LocalDateTime.now());
-        withdrawal.setRejectionReason(reason);
-        withdrawalRepository.save(withdrawal);
+        Withdrawal withdrawal = withdrawalRepository.findById(withdrawalId)
+                .orElseThrow(() -> new WalletException("Withdrawal not found"));
 
         playerService.returnFrozenBalance(withdrawal.getUserId(), withdrawal.getAmount());
 
@@ -230,17 +226,17 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public void fundAdmin(Long superAdminId, Long adminUserId, BigDecimal amount) {
         User superAdmin = userRepository.findById(superAdminId)
-                .orElseThrow(() -> new RuntimeException("Super admin not found"));
+                .orElseThrow(() -> new WalletException("Super admin not found"));
 
         if (superAdmin.getRole() != Role.SUPER_ADMIN) {
-            throw new RuntimeException("Only super admin can fund admins");
+            throw new WalletException("Only super admin can fund admins");
         }
 
         User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
         if (admin.getRole() != Role.ADMIN) {
-            throw new RuntimeException("User is not an admin");
+            throw new WalletException("User is not an admin");
         }
 
         admin.setBalance(admin.getBalance().add(amount));
@@ -257,31 +253,31 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public void approveCoinRequest(Long requestId, Long approverId) {
         CoinRequest request = coinRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Coin request not found"));
+                .orElseThrow(() -> new WalletException("Coin request not found"));
 
         if (request.getStatus() != RequestStatus.PENDING) {
-            throw new RuntimeException("Request already processed");
+            throw new RequestAlreadyProcessedException("Request already processed");
         }
 
         User approver = userRepository.findById(approverId)
-                .orElseThrow(() -> new RuntimeException("Approver not found"));
+                .orElseThrow(() -> new WalletException("Approver not found"));
 
         if (approver.getRole() != Role.ADMIN) {
-            throw new RuntimeException("Only admins can approve coin requests");
+            throw new WalletException("Only admins can approve coin requests");
         }
         if (approver.getBalance().compareTo(request.getAmount()) < 0) {
-            throw new RuntimeException("Insufficient balance to approve request");
+            throw new WalletException("Insufficient balance to approve request");
         }
 
-        approver.setBalance(approver.getBalance().subtract(request.getAmount()));
-        userRepository.save(approver);
+        // Atomic claim: a concurrent/double approval can never proceed past this line.
+        if (coinRequestRepository.claimForProcessing(requestId, RequestStatus.APPROVED,
+                RequestStatus.PENDING, approverId, LocalDateTime.now(), null) == 0) {
+            throw new RequestAlreadyProcessedException("Request already processed");
+        }
 
+        // Tenant DB work first: if any of it fails, the master-side deduction below
+        // must not have happened yet (the two DBs cannot share one transaction).
         playerService.addBalance(request.getUserId(), request.getAmount());
-
-        request.setStatus(RequestStatus.APPROVED);
-        request.setApprovedBy(approverId);
-        request.setApprovedAt(LocalDateTime.now());
-        coinRequestRepository.save(request);
 
         Transaction transaction = transactionRepository.findByReferenceIdAndType(
                         requestId, TransactionType.TOP_UP.name())
@@ -296,23 +292,19 @@ public class WalletService {
         createTransaction(approverId, TransactionType.FUND_AGENT_TO_PLAYER, request.getAmount(),
                 TransactionStatus.COMPLETED, requestId, "Funded player " + request.getUserId());
 
+        approver.setBalance(approver.getBalance().subtract(request.getAmount()));
+        userRepository.save(approver);
+
         log.info("Coin request {} approved by {} — deducted from approver balance", requestId, approverId);
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectCoinRequest(Long requestId, Long approverId, String reason) {
-        CoinRequest request = coinRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Coin request not found"));
-
-        if (request.getStatus() != RequestStatus.PENDING) {
-            throw new RuntimeException("Request already processed");
+        // Atomic claim: a concurrent/double rejection can never proceed past this line.
+        if (coinRequestRepository.claimForProcessing(requestId, RequestStatus.REJECTED,
+                RequestStatus.PENDING, approverId, LocalDateTime.now(), reason) == 0) {
+            throw new RequestAlreadyProcessedException("Request already processed");
         }
-
-        request.setStatus(RequestStatus.REJECTED);
-        request.setApprovedBy(approverId);
-        request.setApprovedAt(LocalDateTime.now());
-        request.setRejectionReason(reason);
-        coinRequestRepository.save(request);
 
         Transaction transaction = transactionRepository.findByReferenceIdAndType(
                         requestId, TransactionType.TOP_UP.name())
@@ -357,14 +349,14 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public AdminFundRequest requestAdminFund(Long adminUserId, BigDecimal amount, String screenshotUrl) {
         User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
         if (admin.getRole() != Role.ADMIN) {
-            throw new RuntimeException("Only admins can request funds");
+            throw new WalletException("Only admins can request funds");
         }
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("Amount must be positive");
+            throw new WalletException("Amount must be positive");
         }
 
         AdminFundRequest request = AdminFundRequest.builder()
@@ -385,29 +377,36 @@ public class WalletService {
     // ledger lives in the agent's tenant DB, and the two cannot share one transaction.
     public void approveAdminFundRequest(Long requestId, Long superAdminId) {
         User superAdmin = userRepository.findById(superAdminId)
-                .orElseThrow(() -> new RuntimeException("Super admin not found"));
+                .orElseThrow(() -> new WalletException("Super admin not found"));
 
         if (superAdmin.getRole() != Role.SUPER_ADMIN) {
-            throw new RuntimeException("Only super admin can approve admin fund requests");
+            throw new WalletException("Only super admin can approve admin fund requests");
         }
 
         AdminFundRequest request = adminFundRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Fund request not found"));
+                .orElseThrow(() -> new WalletException("Fund request not found"));
 
         if (request.getStatus() != FundStatus.PENDING) {
-            throw new RuntimeException("Request already processed");
+            throw new RequestAlreadyProcessedException("Request already processed");
         }
 
         User admin = userRepository.findById(request.getAdminUserId())
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
-        admin.setBalance(admin.getBalance().add(request.getAmount()));
-        userRepository.save(admin);
+        // Atomic claim: a concurrent/double approval can never proceed past this line.
+        if (adminFundRequestRepository.claimForProcessing(requestId, FundStatus.APPROVED,
+                FundStatus.PENDING, superAdminId, LocalDateTime.now(), null) == 0) {
+            throw new RequestAlreadyProcessedException("Request already processed");
+        }
 
-        request.setStatus(FundStatus.APPROVED);
-        request.setApprovedBy(superAdminId);
-        request.setApprovedAt(LocalDateTime.now());
-        adminFundRequestRepository.save(request);
+        try {
+            admin.setBalance(admin.getBalance().add(request.getAmount()));
+            userRepository.save(admin);
+        } catch (Exception e) {
+            // Compensation: do not leave the request approved without the credit.
+            revertFundRequestClaim(requestId);
+            throw e;
+        }
 
         recordTenantLedger(request.getAdminUserId(), admin.getId(), TransactionType.FUND_SUPER_ADMIN_TO_AGENT,
                 request.getAmount(), requestId, "Approved fund request for admin " + request.getAdminUserId());
@@ -416,6 +415,15 @@ public class WalletService {
 
         log.info("Admin fund request {} approved by super admin {} — admin {} funded with {}",
                 requestId, superAdminId, request.getAdminUserId(), request.getAmount());
+    }
+
+    private void revertFundRequestClaim(Long requestId) {
+        try {
+            adminFundRequestRepository.claimForProcessing(requestId, FundStatus.PENDING,
+                    FundStatus.APPROVED, null, null, null);
+        } catch (Exception revertEx) {
+            log.error("CRITICAL: failed to revert fund request {} to PENDING after a failed credit", requestId, revertEx);
+        }
     }
 
     /**
@@ -436,18 +444,11 @@ public class WalletService {
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public void rejectAdminFundRequest(Long requestId, Long superAdminId, String reason) {
-        AdminFundRequest request = adminFundRequestRepository.findById(requestId)
-                .orElseThrow(() -> new RuntimeException("Fund request not found"));
-
-        if (request.getStatus() != FundStatus.PENDING) {
-            throw new RuntimeException("Request already processed");
+        // Atomic claim: a concurrent/double rejection can never proceed past this line.
+        if (adminFundRequestRepository.claimForProcessing(requestId, FundStatus.REJECTED,
+                FundStatus.PENDING, superAdminId, LocalDateTime.now(), reason) == 0) {
+            throw new RequestAlreadyProcessedException("Request already processed");
         }
-
-        request.setStatus(FundStatus.REJECTED);
-        request.setApprovedBy(superAdminId);
-        request.setApprovedAt(LocalDateTime.now());
-        request.setRejectionReason(reason);
-        adminFundRequestRepository.save(request);
 
         log.info("Admin fund request {} rejected by super admin {}: {}", requestId, superAdminId, reason);
     }
@@ -493,7 +494,7 @@ public class WalletService {
     @Transactional(transactionManager = "tenantTransactionManager")
     public void creditAgentCommission(Long adminUserId, BigDecimal amount, Long gameId) {
         User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
         admin.setBalance(admin.getBalance().add(amount));
         userRepository.save(admin);
@@ -503,29 +504,18 @@ public class WalletService {
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
-    public void deductPlatformFee(Long adminUserId, BigDecimal amount, Long gameId) {
+    public void creditUnclaimedPrize(Long adminUserId, BigDecimal amount, Long gameId) {
         User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new RuntimeException("Admin not found"));
+                .orElseThrow(() -> new WalletException("Admin not found"));
 
-        BigDecimal adminBalance = admin.getBalance() != null ? admin.getBalance() : BigDecimal.ZERO;
-        BigDecimal actualDeduction = amount.min(adminBalance);
-        if (actualDeduction.compareTo(BigDecimal.ZERO) <= 0) {
-            log.warn("Admin {} has zero balance — platform fee {} cannot be collected for game {}",
-                    adminUserId, amount, gameId);
-            return;
-        }
-
-        if (actualDeduction.compareTo(amount) < 0) {
-            log.warn("Admin {} has insufficient balance for platform fee: has {}, needs {}. Collecting {}",
-                    adminUserId, adminBalance, amount, actualDeduction);
-        }
-
-        admin.setBalance(admin.getBalance().subtract(actualDeduction));
+        admin.setBalance(admin.getBalance().add(amount));
         userRepository.save(admin);
 
-        createTransaction(adminUserId, TransactionType.PLATFORM_FEE, actualDeduction,
-                TransactionStatus.COMPLETED, gameId, "Platform fee for game " + gameId);
+        createTransaction(adminUserId, TransactionType.UNCLAIMED_PRIZE, amount,
+                TransactionStatus.COMPLETED, gameId, "Unclaimed prize share from game " + gameId);
     }
+
+    @Transactional(transactionManager = "tenantTransactionManager")
 
     // =========================================================
     // PRIVATE HELPER METHODS
