@@ -30,7 +30,10 @@ public class TenantManagementService {
             "db/migration/V5__add_bingo_claim_validated_by.sql",
             "db/migration/V6__add_bingo_claim_rejection_reason.sql",
             "db/migration/V7__add_game_commission_percent.sql",
-            "db/migration/V8__add_game_fairness_hash.sql"
+            "db/migration/V8__add_game_fairness_hash.sql",
+            "db/migration/V9__add_game_auto_mark.sql",
+            "db/migration/V10__add_game_card_marked_numbers.sql",
+            "db/migration/V11__add_race_condition_constraints.sql"
     );
 
     private final TenantRegistryRepository tenantRegistryRepository;
@@ -126,7 +129,16 @@ public class TenantManagementService {
                     stmt.execute("CREATE SCHEMA IF NOT EXISTS public");
                 }
                 for (String script : TENANT_SQL_SCRIPTS) {
-                    ScriptUtils.executeSqlScript(conn, new ClassPathResource(script));
+                    try {
+                        ScriptUtils.executeSqlScript(conn, new ClassPathResource(script));
+                    } catch (Exception ex) {
+                        String msg = ex.getCause() != null ? ex.getCause().getMessage() : ex.getMessage();
+                        if (msg != null && (msg.contains("already exists") || msg.contains("duplicate"))) {
+                            log.info("Migration {} already applied to {}: {}", script, databaseName, msg);
+                        } else {
+                            throw ex;
+                        }
+                    }
                 }
                 SchemaMigrationHelper.runTenantMigrations(conn);
             }

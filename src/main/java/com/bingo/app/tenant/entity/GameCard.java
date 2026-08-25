@@ -36,6 +36,10 @@ public class GameCard {
     @Builder.Default
     private boolean banned = false;
 
+    /** Comma-separated numbers the player daubed manually (auto-mark games leave this null). */
+    @Column(name = "marked_numbers")
+    private String markedNumbers;
+
     @Builder.Default
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();

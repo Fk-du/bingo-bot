@@ -18,7 +18,7 @@ public interface GameRepository extends JpaRepository<Game, Long> {
     Optional<Game> findByAdminUserIdAndStatus(Long adminUserId, GameStatus status);
 
     @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN :statuses")
-    Optional<Game> findByAdminUserIdAndStatusIn(@Param("adminUserId") Long adminUserId, @Param("statuses") List<GameStatus> statuses);
+    List<Game> findAllByAdminUserIdAndStatusIn(@Param("adminUserId") Long adminUserId, @Param("statuses") List<GameStatus> statuses);
 
     List<Game> findAllByAdminUserIdOrderByCreatedAtDesc(Long adminUserId);
 
@@ -34,7 +34,7 @@ public interface GameRepository extends JpaRepository<Game, Long> {
     @Query("SELECT g FROM Game g WHERE g.adminUserId = :adminUserId AND g.status NOT IN ('ENDED') ORDER BY g.createdAt DESC")
     Optional<Game> findActiveGameByAdmin(@Param("adminUserId") Long adminUserId);
 
-    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN ('REGISTRATION_OPEN', 'IN_PROGRESS', 'PAUSED', 'CLAIM_PENDING')")
+    @Query("SELECT COUNT(g) > 0 FROM Game g WHERE g.adminUserId = :adminUserId AND g.status IN ('STARTING', 'IN_PROGRESS', 'PAUSED', 'CLAIM_PENDING')")
     boolean hasActiveGame(@Param("adminUserId") Long adminUserId);
 
     List<Game> findByStatus(GameStatus status);

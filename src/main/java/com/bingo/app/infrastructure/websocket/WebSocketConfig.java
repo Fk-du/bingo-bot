@@ -133,15 +133,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                                     new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
                             accessor.setUser(auth);
                             log.debug("WebSocket STOMP CONNECT authenticated: {}", user.getTelegramId());
-                        } else {
-                            log.warn("WebSocket STOMP CONNECT auth failed: invalid token");
+                            return message;
                         }
                     } catch (Exception e) {
                         log.error("WebSocket STOMP CONNECT auth error: {}", e.getMessage());
                     }
-                } else {
-                    log.debug("No auth token in STOMP CONNECT frame");
                 }
+
+                log.warn("WebSocket STOMP CONNECT rejected: invalid or missing auth token");
+                accessor.setLeaveMutable(true);
+                return message;
             }
 
             return message;

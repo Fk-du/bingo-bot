@@ -18,6 +18,7 @@ public class ConfigController {
     private final ConfigService configService;
 
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ApiResponse<Map<String, Object>> getConfig() {
         return ApiResponse.ok(configService.getAll());
     }

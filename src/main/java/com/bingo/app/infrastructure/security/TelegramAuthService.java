@@ -21,6 +21,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +33,15 @@ public class TelegramAuthService {
 
     private final UserService userService;
     private final BingoTelegramBot bingoTelegramBot;
+
+    /**
+     * H-1 replay protection: tracks the latest auth_date seen per telegram user ID.
+     * Within a session Telegram sends the same auth_date on every request — we allow
+     * it for a grace window (30 s) so concurrent requests work. After the window
+     * closes we reject any request whose auth_date is not strictly newer.
+     */
+    private static final long AUTH_DATE_GRACE_MS = 30_000L;
+    private final ConcurrentHashMap<Long, long[]> authDateTracker = new ConcurrentHashMap<>(); // {auth_date_sec, first_seen_ms}
 
     @Value("${app.telegram.bot.token}")
     private String botToken;
@@ -60,10 +70,10 @@ public class TelegramAuthService {
             if (authDateStr != null) {
                 try {
                     long authDate = Long.parseLong(authDateStr);
-                    long now = System.currentTimeMillis() / 1000;
+                    long nowSec = System.currentTimeMillis() / 1000;
                     long maxAge = 86400;
-                    if (now - authDate > maxAge) {
-                        log.warn("Telegram auth data expired: authDate={}, now={}, diff={}s", authDate, now, now - authDate);
+                    if (nowSec - authDate > maxAge) {
+                        log.warn("Telegram auth data expired: authDate={}, now={}, diff={}s", authDate, nowSec, nowSec - authDate);
                         return null;
                     }
                 } catch (NumberFormatException e) {
@@ -83,6 +93,30 @@ public class TelegramAuthService {
             String username = textOrNull(userNode, "username");
             String firstName = textOrNull(userNode, "first_name");
             String lastName = textOrNull(userNode, "last_name");
+
+            // --- H-1: replay protection via auth_date progression ---
+            if (authDateStr != null) {
+                try {
+                    long authDate = Long.parseLong(authDateStr);
+                    long nowMs = System.currentTimeMillis();
+                    long[] prev = authDateTracker.get(telegramId);
+                    if (prev != null) {
+                        long prevAuthDate = (long) prev[0];
+                        long prevSeenAt = (long) prev[1];
+                        if (authDate < prevAuthDate) {
+                            log.warn("Replay rejected for user {}: auth_date {} < last seen {}", telegramId, authDate, prevAuthDate);
+                            return null;
+                        }
+                        if (authDate == prevAuthDate && (nowMs - prevSeenAt) > AUTH_DATE_GRACE_MS) {
+                            log.warn("Stale session rejected for user {}: auth_date {} same for {}ms (grace={}ms)",
+                                    telegramId, authDate, nowMs - prevSeenAt, AUTH_DATE_GRACE_MS);
+                            return null;
+                        }
+                    }
+                    authDateTracker.put(telegramId, new long[]{authDate, nowMs});
+                } catch (NumberFormatException ignored) {
+                }
+            }
 
             return userService.findOrCreateUser(telegramId, username, firstName, lastName);
 

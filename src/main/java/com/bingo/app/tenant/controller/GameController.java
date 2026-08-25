@@ -5,6 +5,7 @@ import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.tenant.dto.CreateGameRequest;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
+import com.bingo.app.tenant.dto.request.ClaimBingoRequest;
 import com.bingo.app.tenant.dto.request.GameSettingsUpdateRequest;
 import com.bingo.app.tenant.dto.response.AdminGameStateResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
@@ -71,7 +72,7 @@ public class GameController {
             @PathVariable Long id,
             @Valid @RequestBody GameSettingsUpdateRequest request) {
         var game = gameService.updateGameSettings(id, principal.getUser().getId(),
-                request.maxPlayers(), request.callInterval(), request.winningPattern(), request.commissionPercent());
+                request.maxPlayers(), request.callInterval(), request.winningPattern(), request.commissionPercent(), request.autoMark());
         return ApiResponse.ok("Game settings updated", game);
     }
 
@@ -128,14 +129,28 @@ public class GameController {
 
     @PostMapping("/{id}/pause")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<String> pauseGame(@PathVariable Long id) {
+    public ApiResponse<String> pauseGame(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var game = gameService.getGameById(id)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+        if (!game.adminUserId().equals(principal.getUser().getId())) {
+            throw new RuntimeException("Game does not belong to this admin");
+        }
         gameEngineService.pauseGame(id);
         return ApiResponse.ok("Game paused");
     }
 
     @PostMapping("/{id}/resume")
     @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<String> resumeGame(@PathVariable Long id) {
+    public ApiResponse<String> resumeGame(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var game = gameService.getGameById(id)
+                .orElseThrow(() -> new RuntimeException("Game not found"));
+        if (!game.adminUserId().equals(principal.getUser().getId())) {
+            throw new RuntimeException("Game does not belong to this admin");
+        }
         gameEngineService.resumeGame(id);
         return ApiResponse.ok("Game resumed");
     }
@@ -154,14 +169,12 @@ public class GameController {
         var user = principal.getUser();
         switch (user.getRole()) {
             case ADMIN -> {
-                var game = gameService.findCurrentGameForAdmin(user.getId());
-                return ApiResponse.ok(game.map(List::of).orElse(List.of()));
+                return ApiResponse.ok(gameService.findOpenGamesForAdmin(user.getId()));
             }
             case PLAYER -> {
                 Long adminUserId = AdminIds.adminUserId(user);
                 if (adminUserId == null) return ApiResponse.ok(List.of());
-                var game = gameService.findCurrentGameForPlayer(adminUserId, user.getId());
-                return ApiResponse.ok(game.map(List::of).orElse(List.of()));
+                return ApiResponse.ok(gameService.findOpenGamesForAdmin(adminUserId));
             }
             default -> {
                 return ApiResponse.ok(List.of());
@@ -185,8 +198,10 @@ public class GameController {
     @PreAuthorize("hasRole('PLAYER')")
     public ApiResponse<BingoClaimResultResponse> claim(
             @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id) throws JsonProcessingException {
-        var result = gameEngineService.claimBingo(id, principal.getUser().getId());
+            @PathVariable Long id,
+            @RequestBody(required = false) ClaimBingoRequest request) throws JsonProcessingException {
+        var result = gameEngineService.claimBingo(id, principal.getUser().getId(),
+                request == null ? null : request.getMarkedNumbers());
         String message;
         if (result.isBanned()) {
             message = "Invalid Bingo claim — you have been banned from this game";
@@ -211,27 +226,6 @@ public class GameController {
         return ApiResponse.ok(gameEngineService.getPendingClaims(id));
     }
 
-    @PostMapping("/{id}/claims/{claimId}/approve")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ApiResponse<BingoClaimResultResponse> approveClaim(
-            @AuthenticationPrincipal UserPrincipal principal,
-            @PathVariable Long id,
-            @PathVariable Long claimId) {
-        var result = gameEngineService.approveClaim(id, claimId, principal.getUser().getId());
-        String message = result.isGameEnded()
-                ? "Claim approved, winner paid. Game ended (max winners reached)."
-                : "Claim approved, winner paid.";
-        return ApiResponse.ok(message, BingoClaimResultResponse.builder()
-                .valid(true)
-                .claimId(result.getClaimId())
-                .pendingReview(false)
-                .gameEnded(result.isGameEnded())
-                .approvedCount(result.getApprovedCount())
-                .rewardAmount(result.getRewardAmount())
-                .commission(result.getCommission())
-                .build());
-    }
-
     @PostMapping("/{id}/claims/{claimId}/reject")
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<String> rejectClaim(
@@ -241,6 +235,43 @@ public class GameController {
             @RequestParam(defaultValue = "Claim rejected by admin") String reason) {
         gameEngineService.rejectClaim(id, claimId, principal.getUser().getId(), reason);
         return ApiResponse.ok("Claim rejected, game resumed");
+    }
+
+    @PostMapping("/{id}/marks")
+    @PreAuthorize("hasRole('PLAYER')")
+    public ApiResponse<Void> saveMarks(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody ClaimBingoRequest request) {
+        gameEngineService.saveMarks(id, principal.getUser().getId(), request.getMarkedNumbers());
+        return ApiResponse.ok("Marks saved", null);
+    }
+
+    @PostMapping("/{id}/claims/approve-all")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<BingoClaimResultResponse> approveAllClaims(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var result = gameEngineService.approveAllClaims(id, principal.getUser().getId());
+        return ApiResponse.ok("All pending claims approved — winners share the pot. Game ended.",
+                BingoClaimResultResponse.builder()
+                        .valid(true)
+                        .pendingReview(false)
+                        .gameEnded(true)
+                        .approvedCount(result.getApprovedCount())
+                        .rewardAmount(result.getRewardAmount())
+                        .commission(result.getCommission())
+                        .build());
+    }
+
+    @PostMapping("/{id}/restart")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ApiResponse<GameResponse> restartGame(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        var game = gameService.restartGame(id, principal.getUser().getId());
+        gameEngineService.scheduleGameStart(id, 5);
+        return ApiResponse.ok("Game restarted with a fresh number sequence", game);
     }
 
     @GetMapping("/{id}/audit")

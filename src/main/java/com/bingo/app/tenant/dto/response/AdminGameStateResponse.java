@@ -19,6 +19,7 @@ public record AdminGameStateResponse(
         String winningPattern,
         Integer callInterval,
         BigDecimal commissionPercent,
+        boolean autoMark,
         LocalDateTime startTime,
         LocalDateTime endTime,
         LocalDateTime createdAt,

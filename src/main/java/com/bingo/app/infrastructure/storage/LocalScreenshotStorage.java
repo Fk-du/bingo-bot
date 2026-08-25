@@ -34,9 +34,20 @@ public class LocalScreenshotStorage {
     }
 
     /**
-     * Stores an uploaded payment screenshot and returns its relative serving name.
+     * Stores an uploaded payment screenshot under the given agent's folder and
+     * returns its relative serving name ({@code <agent-folder>/<file>}).
      */
-    public String store(MultipartFile file) {
+    public String store(MultipartFile file, String agentFolder) {
+        String folder = sanitizeFolder(agentFolder);
+        try {
+            Files.createDirectories(rootDir.resolve(folder));
+        } catch (IOException e) {
+            throw new IllegalStateException("Could not create agent screenshot folder", e);
+        }
+        return storeIn(folder, file);
+    }
+
+    private String storeIn(String folder, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File is empty");
         }
@@ -57,7 +68,7 @@ public class LocalScreenshotStorage {
             default -> "bin";
         };
         String filename = UUID.randomUUID() + "." + extension;
-        Path target = resolve(filename);
+        Path target = resolve(folder.isEmpty() ? filename : folder + "/" + filename);
 
         try (InputStream in = file.getInputStream()) {
             Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
@@ -66,8 +77,18 @@ public class LocalScreenshotStorage {
             throw new IllegalStateException("Could not store screenshot", e);
         }
 
-        log.debug("Stored screenshot {} ({} bytes)", filename, file.getSize());
-        return filename;
+        return folder.isEmpty() ? filename : folder + "/" + filename;
+    }
+
+    /** Folder names: letters, digits, dash and underscore only — anything else collapses to '-'. */
+    private static String sanitizeFolder(String agentFolder) {
+        if (agentFolder == null || agentFolder.isBlank()) {
+            return "unsorted";
+        }
+        String cleaned = agentFolder.trim().replaceAll("[^a-zA-Z0-9-_]+", "-");
+        while (cleaned.startsWith("-")) cleaned = cleaned.substring(1);
+        while (cleaned.endsWith("-")) cleaned = cleaned.substring(0, cleaned.length() - 1);
+        return cleaned.isEmpty() ? "unsorted" : cleaned.toLowerCase();
     }
 
     /**

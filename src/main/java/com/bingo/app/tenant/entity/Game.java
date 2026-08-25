@@ -45,6 +45,9 @@ public class Game {
     private Integer callInterval;
     @Column(name = "commission_percent")
     private BigDecimal commissionPercent = new BigDecimal("10.00");
+
+    /** When false players must daub (mark) called numbers themselves before claiming. */
+    private Boolean autoMark = true;
     @Column(name = "fairness_hash")
     private String fairnessHash;
     @Column(name = "start_time")

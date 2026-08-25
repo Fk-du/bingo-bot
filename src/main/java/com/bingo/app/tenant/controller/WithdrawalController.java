@@ -34,14 +34,11 @@ public class WithdrawalController {
     @GetMapping
     public ApiResponse<List<WithdrawalResponse>> listWithdrawals(@AuthenticationPrincipal UserPrincipal principal) {
         var user = principal.getUser();
-        switch (user.getRole()) {
-            case ADMIN -> {
-                return ApiResponse.ok(walletService.getPendingWithdrawsForAdminPlayers(user.getId()));
-            }
-            default -> {
-                return ApiResponse.ok(List.of());
-            }
-        }
+        return switch (user.getRole()) {
+            case ADMIN -> ApiResponse.ok(walletService.getPendingWithdrawsForAdminPlayers(user.getId()));
+            case PLAYER -> ApiResponse.ok(walletService.getPlayerWithdrawals(user.getId()));
+            default -> ApiResponse.ok(List.of());
+        };
     }
 
     @PatchMapping("/{id}/pay")
@@ -52,5 +49,15 @@ public class WithdrawalController {
             @Valid @RequestBody WithdrawalPayRequest request) {
         walletService.approveWithdrawal(id, principal.getUser().getId());
         return ApiResponse.ok("Withdrawal marked as paid");
+    }
+
+    @PatchMapping("/{id}/reject")
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ApiResponse<String> rejectWithdrawal(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestBody java.util.Map<String, String> body) {
+        walletService.rejectWithdrawal(id, principal.getUser().getId(), body.getOrDefault("reason", ""));
+        return ApiResponse.ok("Withdrawal rejected");
     }
 }

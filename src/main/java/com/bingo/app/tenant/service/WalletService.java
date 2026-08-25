@@ -169,6 +169,13 @@ public class WalletService {
                 .toList();
     }
 
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public List<WithdrawalResponse> getPlayerWithdrawals(Long playerId) {
+        return withdrawalRepository.findByUserIdOrderByCreatedAtDesc(playerId).stream()
+                .map(tenantMapper::toDto)
+                .toList();
+    }
+
     @Transactional(transactionManager = "tenantTransactionManager")
     public void approveWithdrawal(Long withdrawalId, Long approverId) {
         // Atomic claim: a concurrent/double approval can never proceed past this line.
@@ -503,17 +510,6 @@ public class WalletService {
                 TransactionStatus.COMPLETED, gameId, "Agent commission from game " + gameId);
     }
 
-    @Transactional(transactionManager = "tenantTransactionManager")
-    public void creditUnclaimedPrize(Long adminUserId, BigDecimal amount, Long gameId) {
-        User admin = userRepository.findById(adminUserId)
-                .orElseThrow(() -> new WalletException("Admin not found"));
-
-        admin.setBalance(admin.getBalance().add(amount));
-        userRepository.save(admin);
-
-        createTransaction(adminUserId, TransactionType.UNCLAIMED_PRIZE, amount,
-                TransactionStatus.COMPLETED, gameId, "Unclaimed prize share from game " + gameId);
-    }
 
     @Transactional(transactionManager = "tenantTransactionManager")
 

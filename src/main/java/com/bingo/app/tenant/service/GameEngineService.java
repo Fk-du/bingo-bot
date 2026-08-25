@@ -95,7 +95,9 @@ public class GameEngineService {
      */
     public void scheduleGameStart(Long gameId, int countdownSeconds) {
         String tenantId = TenantContext.getTenant();
-        publishGameStatusEvent(gameId, GameStatus.STARTING);
+        Game game = gameRepository.findById(gameId).orElse(null);
+        java.time.LocalDateTime startTime = game != null ? game.getStartTime() : java.time.LocalDateTime.now().plusSeconds(countdownSeconds);
+        publishGameStatusEvent(gameId, GameStatus.STARTING, startTime);
         taskScheduler.schedule(() -> {
             TenantContext.setTenant(tenantId);
             try {
@@ -400,7 +402,7 @@ public class GameEngineService {
      * Invalid claims result in an immediate ban from the game (game continues).
      */
     @Transactional(transactionManager = "tenantTransactionManager")
-    public BingoClaimResult claimBingo(Long gameId, Long playerId) throws JsonProcessingException {
+    public BingoClaimResult claimBingo(Long gameId, Long playerId, java.util.List<Integer> markedNumbers) throws JsonProcessingException {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
@@ -418,7 +420,8 @@ public class GameEngineService {
                 .orElseThrow(() -> new RuntimeException("Player not registered for this game"));
 
         if (gameCard.isBanned()) {
-            throw new RuntimeException("You have been banned from this game for an invalid claim");
+            throw new GameProgressException("Player banned from game " + gameId,
+                    "You have been banned from this game.");
         }
 
         // Get called numbers so far
@@ -429,8 +432,26 @@ public class GameEngineService {
         Card card = gameCard.getCard();
         int[][] cardNumbers = parseCardNumbers(card.getNumbers());
 
-        // Validate Bingo server-side
-        boolean isValid = validateBingo(cardNumbers, calledNumbers, game.getWinningPattern());
+        // Validate Bingo server-side. With auto-mark disabled the player must have
+        // daubed the pattern themselves: every marked cell must really be called
+        // (or the free spot) and the marks alone must complete the pattern.
+        boolean isValid;
+        if (Boolean.FALSE.equals(game.getAutoMark())) {
+            // Prefer freshly sent marks; otherwise fall back to the daubs persisted on the card
+            java.util.List<Integer> effectiveMarks = (markedNumbers != null && !markedNumbers.isEmpty())
+                    ? markedNumbers
+                    : parseMarkedNumbers(gameCard);
+            if (effectiveMarks.isEmpty()) {
+                isValid = false;
+            } else {
+                java.util.Set<Integer> calledSet = new java.util.HashSet<>(calledNumbers);
+                boolean marksLegit = effectiveMarks.stream()
+                        .allMatch(n -> n == null || n == 0 || calledSet.contains(n));
+                isValid = marksLegit && validateBingo(cardNumbers, effectiveMarks, game.getWinningPattern());
+            }
+        } else {
+            isValid = validateBingo(cardNumbers, calledNumbers, game.getWinningPattern());
+        }
 
         if (!isValid) {
             bingoClaimRepository.save(BingoClaim.builder()
@@ -490,128 +511,90 @@ public class GameEngineService {
     }
 
     /**
-     * Approve a pending Bingo claim — pays the winner, allows up to MAX_WINNERS per game
+     * Approve ALL pending claims as simultaneous winners (same call state).
+     * Up to {@link #MAX_SIMULTANEOUS_WINNERS} players share the net pool
+     * equally; the game ends and every winner's card is marked.
      */
     @Transactional(transactionManager = "tenantTransactionManager")
-    public BingoClaimResult approveClaim(Long gameId, Long claimId, Long adminId) {
+    public BingoClaimResult approveAllClaims(Long gameId, Long adminId) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
-        if (game.getStatus() != GameStatus.CLAIM_PENDING) {
-            throw new RequestAlreadyProcessedException("Game is not in CLAIM_PENDING state");
+        if (!game.getAdminUserId().equals(adminId)) {
+            throw new GameProgressException("Game does not belong to this admin",
+                    "This game does not belong to you.");
         }
 
-        BingoClaim claim = bingoClaimRepository.findById(claimId)
-                .orElseThrow(() -> new RuntimeException("Claim not found"));
-
-        if (!claim.getGameId().equals(gameId)) {
-            throw new RuntimeException("Claim does not belong to this game");
+        List<BingoClaim> pending = bingoClaimRepository
+                .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
+        if (pending.isEmpty()) {
+            throw new GameProgressException("No pending claims for game " + gameId,
+                    "There are no claims waiting for review.");
+        }
+        if (pending.size() > MAX_SIMULTANEOUS_WINNERS) {
+            throw new GameProgressException(
+                    "Too many simultaneous winners: " + pending.size(),
+                    pending.size() + " players claimed at once. Approving is only allowed for up to "
+                            + MAX_SIMULTANEOUS_WINNERS + " winners — restart the game instead.");
         }
 
-        if (!"VALID".equals(claim.getResult())) {
-            throw new RuntimeException("Only valid claims can be approved");
-        }
-
-        // Count winners BEFORE touching anything so fee logic sees a stable snapshot
-        long priorWinners = bingoClaimRepository
-                .countByGameIdAndResultAndValidatedAtIsNotNull(gameId, "VALID");
-
-        // Atomically claim the claim — concurrent approvals/rejections lose here
+        // Atomically lock every claim — any that lose a race are dropped
         LocalDateTime now = LocalDateTime.now();
-        int claimed = bingoClaimRepository.claimForProcessing(claimId, adminId, now);
-        if (claimed == 0) {
-            throw new RequestAlreadyProcessedException("Claim already processed");
+        List<BingoClaim> winners = new java.util.ArrayList<>();
+        for (BingoClaim c : pending) {
+            if (bingoClaimRepository.claimForProcessing(c.getId(), adminId, now) == 1) {
+                winners.add(c);
+            }
         }
-        claim.setValidatedBy(adminId);
-        claim.setValidatedAt(now);
+        int shareCount = winners.size();
 
-        Long winnerId = claim.getPlayerId();
-
-        // Calculate prize distribution — the admin's commission (per-game %, default 10)
-        // is taken from the pot once; winners split what remains via slot shares.
         BigDecimal prizePool = game.getPrizePool();
         BigDecimal adminCommission = commissionFor(game);
         BigDecimal netPool = prizePool.subtract(adminCommission);
+        walletService.creditAgentCommission(game.getAdminUserId(), adminCommission, gameId);
 
-        // Credit the admin's commission only ONCE (on first winner)
-        if (priorWinners == 0) {
-            walletService.creditAgentCommission(game.getAdminUserId(), adminCommission, gameId);
+        BigDecimal[] shares = splitEvenly(netPool, shareCount);
+        for (int i = 0; i < shareCount; i++) {
+            BingoClaim winner = winners.get(i);
+            winner.setRewardAmount(shares[i]);
+            bingoClaimRepository.save(winner);
+            walletService.creditWinnings(winner.getPlayerId(), shares[i], gameId);
+            gameCardRepository.findByGameIdAndPlayerId(gameId, winner.getPlayerId()).ifPresent(gc -> {
+                gc.setWinner(true);
+                gameCardRepository.save(gc);
+            });
+            cardService.markCardAsWinner(gameId, winner.getPlayerId());
         }
 
-        // Slot shares of the net pool: 1st winner 50%, 2nd 30%, 3rd 20%.
-        // No clawbacks between winners and every coin is accounted for.
-        int slotIndex = (int) priorWinners;
-        BigDecimal share = netPool.multiply(WINNER_SLOT_RATES[slotIndex])
-                .setScale(2, java.math.RoundingMode.HALF_UP);
+        game.setStatus(GameStatus.ENDED);
+        game.setEndTime(LocalDateTime.now());
+        gameRepository.save(game);
+        stopCalling(gameId);
+        publishGameStatusEvent(gameId, GameStatus.ENDED);
 
-        // Mark winner card
-        GameCard winnerCard = gameCardRepository.findByGameIdAndPlayerId(gameId, winnerId)
-                .orElseThrow(() -> new RuntimeException("Winner card not found"));
-        winnerCard.setWinner(true);
-        gameCardRepository.save(winnerCard);
-
-        // Credit this winner their slot share
-        walletService.creditWinnings(winnerId, share, gameId);
-
-        // Update approved claim
-        claim.setRewardAmount(share);
-        bingoClaimRepository.save(claim);
-
-        // Update player's card stats
-        cardService.markCardAsWinner(gameId, winnerId);
-
-        long approvedCount = priorWinners + 1;
-        boolean gameEnded = false;
-
-        if (approvedCount >= MAX_WINNERS) {
-            // Max winners reached — end the game
-            game.setStatus(GameStatus.ENDED);
-            game.setEndTime(LocalDateTime.now());
-            gameRepository.save(game);
-            stopCalling(gameId);
-
-            // Auto-reject remaining pending claims
-            List<BingoClaim> remaining = bingoClaimRepository
-                    .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
-            for (BingoClaim other : remaining) {
-                other.setResult("REJECTED");
-                other.setValidatedBy(adminId);
-                other.setValidatedAt(LocalDateTime.now());
-                other.setRejectionReason("Max winners reached");
-                bingoClaimRepository.save(other);
-            }
-            gameEnded = true;
-
-            publishGameStatusEvent(gameId, GameStatus.ENDED);
-
-            log.info("Game {}: Max winners ({}) reached. Game ended.", gameId, MAX_WINNERS);
-        } else {
-            long remainingPending = bingoClaimRepository
-                    .countByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
-            if (remainingPending == 0) {
-                // All claims resolved by approval — resume the round so others can still win
-                game.setStatus(GameStatus.IN_PROGRESS);
-                gameRepository.save(game);
-                startCallingInternal(gameId);
-                publishClaimResolvedEvent(gameId, GameStatus.IN_PROGRESS);
-                log.info("Game {}: All claims approved, game resumed for remaining winner slots.", gameId);
-            } else {
-                publishClaimResolvedEvent(gameId, GameStatus.CLAIM_PENDING);
-            }
-        }
-
-        log.info("Game {}: Admin {} approved claim {}. Winner: {} (winner #{}/{}), Prize: {}",
-                gameId, adminId, claimId, winnerId, approvedCount, MAX_WINNERS, share);
+        log.info("Game {}: Admin {} approved {} simultaneous winners, each paid {}. Game ended.",
+                gameId, adminId, shareCount, shares[0]);
 
         return BingoClaimResult.builder()
                 .valid(true)
-                .claimId(claimId)
                 .pendingReview(false)
-                .gameEnded(gameEnded)
-                .approvedCount((int) approvedCount)
-                .rewardAmount(share)
+                .gameEnded(true)
+                .approvedCount(shareCount)
+                .rewardAmount(shares[0])
                 .commission(adminCommission)
                 .build();
+    }
+
+    /** Exact cent-perfect even split; earlier winners absorb the rounding remainder. */
+    BigDecimal[] splitEvenly(BigDecimal total, int n) {
+        long cents = total.movePointRight(2).setScale(0, java.math.RoundingMode.DOWN).longValueExact();
+        long base = cents / n;
+        long remainder = cents % n;
+        BigDecimal[] parts = new BigDecimal[n];
+        for (int i = 0; i < n; i++) {
+            parts[i] = BigDecimal.valueOf(base + (i < remainder ? 1 : 0), 2);
+        }
+        return parts;
     }
 
     /**
@@ -647,6 +630,13 @@ public class GameEngineService {
         claim.setRejectionReason(reason);
         bingoClaimRepository.save(claim);
 
+        // An admin-rejected claim bans the player for the rest of this game
+        gameCardRepository.findByGameIdAndPlayerId(gameId, claim.getPlayerId()).ifPresent(gc -> {
+            gc.setBanned(true);
+            gameCardRepository.save(gc);
+        });
+        log.info("Game {}: Player {} banned from the game (claim {} rejected).", gameId, claim.getPlayerId(), claimId);
+
         // Resume game only if no other valid pending claims
         long remaining = bingoClaimRepository.countByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
         if (remaining == 0) {
@@ -677,8 +667,8 @@ public class GameEngineService {
         // refunding them too would double-pay once approval-resume is in play)
         boolean hasWinner = !gameCardRepository.findByGameIdAndWinnerTrue(gameId).isEmpty();
         if (hasWinner) {
-            log.info("Game {}: skipping entry-fee refunds because the game has winner(s).", gameId);
-            sweepUnclaimedPrize(game);
+            // Winner already took the pot (minus commission); losers' fees stay with the house.
+            log.info("Game {}: skipping entry-fee refunds because the game has a winner.", gameId);
         } else {
             refundAllPlayersForGame(gameId, game.getEntryFee());
         }
@@ -700,29 +690,6 @@ public class GameEngineService {
                 .divide(new BigDecimal("100"), 2, java.math.RoundingMode.HALF_UP);
     }
 
-    /**
-     * When a game ends with fewer winners than prize slots, sweep the unpaid
-     * slot value of the net pool to the agent admin so no prize money vanishes.
-     */
-    private void sweepUnclaimedPrize(Game game) {
-        List<BingoClaim> approved = bingoClaimRepository
-                .findByGameIdAndResultOrderByClaimedAt(game.getId(), "VALID").stream()
-                .filter(c -> c.getValidatedAt() != null)
-                .toList();
-        if (approved.isEmpty()) return;
-
-        BigDecimal netPool = game.getPrizePool().subtract(commissionFor(game));
-
-        BigDecimal paid = approved.stream()
-                .map(c -> c.getRewardAmount() == null ? BigDecimal.ZERO : c.getRewardAmount())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal leftover = netPool.subtract(paid).setScale(2, java.math.RoundingMode.HALF_UP);
-
-        if (leftover.compareTo(BigDecimal.ZERO) > 0) {
-            walletService.creditUnclaimedPrize(game.getAdminUserId(), leftover, game.getId());
-            log.info("Game {}: swept unclaimed prize share {} to agent {}", game.getId(), leftover, game.getAdminUserId());
-        }
-    }
 
     /**
      * Validate Bingo claim — respects the game's configured winning pattern.
@@ -737,7 +704,7 @@ public class GameEngineService {
      * X_SHAPE: both diagonals complete.
      * POSTAGE_STAMP: any 2x2 block in a corner is complete.
      */
-    private boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
+    boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
         Set<Integer> calledSet = new HashSet<>(calledNumbers);
         calledSet.add(0);
 
@@ -874,6 +841,9 @@ public class GameEngineService {
                 .hasPlayerCard(gameCard != null)
                 .isWinner(gameCard != null && gameCard.isWinner())
                 .isBanned(gameCard != null && gameCard.isBanned())
+                .autoMark(!Boolean.FALSE.equals(game.getAutoMark()))
+                .commissionPercent(game.getCommissionPercent())
+                .markedNumbers(parseMarkedNumbers(gameCard))
                 .startTime(game.getStartTime())
                 .winningPattern(game.getWinningPattern())
                 .fairnessHash(game.getFairnessHash())
@@ -906,6 +876,56 @@ public class GameEngineService {
         private Game game;
         private List<Integer> calledNumbers;
         private int playerCount;
+    }
+
+    static java.util.List<Integer> parseMarkedNumbers(GameCard gameCard) {
+        if (gameCard == null || gameCard.getMarkedNumbers() == null
+                || gameCard.getMarkedNumbers().isBlank()) {
+            return java.util.List.of();
+        }
+        try {
+            return java.util.Arrays.stream(gameCard.getMarkedNumbers().split(","))
+                    .map(String::trim)
+                    .filter(t -> !t.isEmpty())
+                    .map(Integer::valueOf)
+                    .toList();
+        } catch (NumberFormatException e) {
+            return java.util.List.of();
+        }
+    }
+
+    /**
+     * Persist the player's manual daubs so they survive refreshes and reconnects.
+     * Every mark must correspond to an already-called number (or the free spot).
+     */
+    @Transactional(transactionManager = "tenantTransactionManager")
+    public void saveMarks(Long gameId, Long playerId, java.util.List<Integer> markedNumbers) {
+        if (markedNumbers == null) {
+            markedNumbers = java.util.List.of();
+        }
+        GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
+                .orElseThrow(() -> new RuntimeException("Player not registered for this game"));
+
+        if (Boolean.TRUE.equals(gameRepository.findById(gameId)
+                .map(Game::getAutoMark).orElse(true))) {
+            throw new GameProgressException("Game uses auto-marking",
+                    "This game marks numbers automatically.");
+        }
+
+        java.util.Set<Integer> allowed = new java.util.HashSet<>(
+                calledNumberRepository.findCalledNumbersByGameId(gameId));
+        allowed.add(0);
+        for (Integer n : markedNumbers) {
+            if (n == null || !allowed.contains(n)) {
+                throw new GameProgressException("Number not called yet",
+                        (n == null ? "A mark" : n) + " hasn't been called yet.");
+            }
+        }
+
+        gameCard.setMarkedNumbers(markedNumbers.stream()
+                .map(String::valueOf)
+                .collect(java.util.stream.Collectors.joining(",")));
+        gameCardRepository.save(gameCard);
     }
 
     /**
@@ -957,7 +977,7 @@ public class GameEngineService {
     }
 
     /**
-     * Resume number calling
+     * Resume number calling (with 5-second countdown)
      */
     public void resumeGame(Long gameId) {
         Game game = gameRepository.findById(gameId)
@@ -967,24 +987,43 @@ public class GameEngineService {
             throw new RuntimeException("Game is not paused");
         }
 
-        game.setStatus(GameStatus.IN_PROGRESS);
+        int countdownSeconds = 5;
+        game.setStatus(GameStatus.STARTING);
+        game.setStartTime(LocalDateTime.now().plusSeconds(countdownSeconds));
         gameRepository.save(game);
 
-        startCalling(gameId);
+        String tenantId = TenantContext.getTenant();
+        publishGameStatusEvent(gameId, GameStatus.STARTING, game.getStartTime());
 
-        publishGameStatusEvent(gameId, GameStatus.IN_PROGRESS);
+        taskScheduler.schedule(() -> {
+            TenantContext.setTenant(tenantId);
+            try {
+                transactionTemplate.execute(status -> {
+                    Game g = gameRepository.findById(gameId).orElse(null);
+                    if (g == null) return null;
+                    if (g.getStatus() == GameStatus.STARTING) {
+                        g.setStatus(GameStatus.IN_PROGRESS);
+                        g.setStartTime(LocalDateTime.now());
+                        gameRepository.save(g);
+                    }
+                    if (g.getStatus() == GameStatus.IN_PROGRESS) {
+                        startCallingInternal(gameId);
+                    }
+                    return null;
+                });
+            } catch (Exception e) {
+                log.error("Failed to resume game {} after countdown: {}", gameId, e.getMessage(), e);
+            } finally {
+                TenantContext.clear();
+            }
+        }, Math.max(0, countdownSeconds), java.util.concurrent.TimeUnit.SECONDS);
 
-        log.info("Game {} resumed", gameId);
+        log.info("Game {} resuming in {} seconds", gameId, countdownSeconds);
     }
 
-    private static final int MAX_WINNERS = 3;
 
-    // Share of the net prize pool paid to the 1st/2nd/3rd approved winner (sums to 100%)
-    private static final java.math.BigDecimal[] WINNER_SLOT_RATES = {
-            new java.math.BigDecimal("0.50"),
-            new java.math.BigDecimal("0.30"),
-            new java.math.BigDecimal("0.20")
-    };
+    // Maximum simultaneous winners who may share the pot
+    private static final int MAX_SIMULTANEOUS_WINNERS = 3;
 
     // WebSocket event publishers
     private void publishEvent(Long gameId, String type, ObjectNode data) {
@@ -1009,8 +1048,15 @@ public class GameEngineService {
     }
 
     private void publishGameStatusEvent(Long gameId, GameStatus status) {
+        publishGameStatusEvent(gameId, status, null);
+    }
+
+    private void publishGameStatusEvent(Long gameId, GameStatus status, java.time.LocalDateTime startTime) {
         ObjectNode data = objectMapper.createObjectNode();
         data.put("status", status.name());
+        if (startTime != null) {
+            data.put("startTime", startTime.toString());
+        }
         publishEvent(gameId, "GAME_STATUS_CHANGED", data);
     }
 
@@ -1078,6 +1124,9 @@ public class GameEngineService {
         private boolean hasPlayerCard;
         private boolean isWinner;
         private boolean isBanned;
+        private Boolean autoMark;
+        private BigDecimal commissionPercent;
+        private java.util.List<Integer> markedNumbers;
         private java.time.LocalDateTime startTime;
         private String winningPattern;
         private String fairnessHash;

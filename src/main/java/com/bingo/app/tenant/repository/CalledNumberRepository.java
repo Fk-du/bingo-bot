@@ -2,6 +2,7 @@ package com.bingo.app.tenant.repository;
 
 import com.bingo.app.tenant.entity.CalledNumber;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -50,4 +51,8 @@ public interface CalledNumberRepository extends JpaRepository<CalledNumber, Long
     // Get called numbers count
     @Query("SELECT COUNT(c) FROM CalledNumber c WHERE c.gameId = :gameId AND c.calledAt IS NOT NULL")
     long getCalledNumbersCount(@Param("gameId") Long gameId);
+
+    @Modifying
+    @Query("DELETE FROM CalledNumber c WHERE c.gameId = :gameId")
+    void deleteByGameId(@Param("gameId") Long gameId);
 }

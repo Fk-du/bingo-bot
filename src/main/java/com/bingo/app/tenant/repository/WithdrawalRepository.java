@@ -20,6 +20,8 @@ public interface WithdrawalRepository extends JpaRepository<Withdrawal, Long> {
 
     List<Withdrawal> findByStatus(RequestStatus status);
 
+    List<Withdrawal> findByUserIdOrderByCreatedAtDesc(Long userId);
+
     /**
      * Atomically moves a PENDING withdrawal to the target status. Returns 0 when the
      * withdrawal was already processed, which makes concurrent/double approvals impossible.
