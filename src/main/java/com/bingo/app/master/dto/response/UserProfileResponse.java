@@ -15,6 +15,7 @@ public record UserProfileResponse(
         String role,
         Long adminUserId,
         String businessName,
+        String depositAccountInfo,
         boolean adminApproved,
         Long parentId,
         BigDecimal balance,
@@ -31,6 +32,7 @@ public record UserProfileResponse(
                 .role(user.getRole().name())
                 .adminUserId(user.getAdminUserId())
                 .businessName(user.getBusinessName())
+                .depositAccountInfo(user.getDepositAccountInfo())
                 .adminApproved(user.isAdminApproved())
                 .parentId(user.getParentId())
                 .balance(user.getBalance())

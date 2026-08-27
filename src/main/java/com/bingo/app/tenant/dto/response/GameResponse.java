@@ -23,5 +23,7 @@ public record GameResponse(
         LocalDateTime startTime,
         LocalDateTime endTime,
         LocalDateTime createdAt,
-        Boolean registered
+        Boolean registered,
+        Long activeGameId
+        , Integer registeredPlayers
 ) {}

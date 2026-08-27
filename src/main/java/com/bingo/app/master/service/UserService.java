@@ -11,8 +11,8 @@ import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.UserRepository;
 import com.bingo.app.tenant.service.PlayerService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +21,6 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class UserService {
 
@@ -29,14 +28,44 @@ public class UserService {
     private final TenantManagementService tenantManagementService;
     private final PlayerService playerService;
     private final MasterMapper masterMapper;
+    private final ObjectProvider<InviteService> inviteServiceProvider;
+
+    public UserService(UserRepository userRepository,
+                       TenantManagementService tenantManagementService,
+                       PlayerService playerService,
+                       MasterMapper masterMapper,
+                       ObjectProvider<InviteService> inviteServiceProvider) {
+        this.userRepository = userRepository;
+        this.tenantManagementService = tenantManagementService;
+        this.playerService = playerService;
+        this.masterMapper = masterMapper;
+        this.inviteServiceProvider = inviteServiceProvider;
+    }
 
     @Value("${app.super-admin.telegram-id}")
     private Long superAdminTelegramId;
 
     @Transactional
     public User findOrCreateUser(Long telegramId, String username, String firstName, String lastName) {
-        return userRepository.findByTelegramId(telegramId)
-                .orElseGet(() -> createNewUser(telegramId, username, firstName, lastName));
+        return findOrCreateUser(telegramId, username, firstName, lastName, null);
+    }
+
+    public User findOrCreateUser(Long telegramId, String username, String firstName, String lastName, String startParam) {
+        User existing = userRepository.findByTelegramId(telegramId).orElse(null);
+        if (existing != null) {
+            return existing;
+        }
+
+        // New user with invite code — register through InviteService (outside @Transactional to avoid poisoning)
+        if (startParam != null && !startParam.isBlank()) {
+            try {
+                return inviteServiceProvider.getObject().registerWithInvite(telegramId, startParam);
+            } catch (Exception e) {
+                log.warn("Invite registration failed for code={}, falling back to default: {}", startParam, e.getMessage());
+            }
+        }
+
+        return createNewUser(telegramId, username, firstName, lastName);
     }
 
     private User createNewUser(Long telegramId, String username, String firstName, String lastName) {
@@ -175,6 +204,13 @@ public class UserService {
     @Transactional(readOnly = true)
     public List<AdminListItem> findAllByParentIdAndRole(Long parentId, Role role) {
         return userRepository.findAllByParentIdAndRole(parentId, role).stream()
+                .map(masterMapper::toAdminListItem)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<AdminListItem> findAllByAdminUserId(Long adminUserId) {
+        return userRepository.findAllByAdminUserId(adminUserId).stream()
                 .map(masterMapper::toAdminListItem)
                 .toList();
     }

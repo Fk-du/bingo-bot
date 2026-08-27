@@ -21,6 +21,7 @@ public class PlayerService {
 
     private final PlayerRepository playerRepository;
     private final TenantMapper tenantMapper;
+    private final com.bingo.app.master.repository.UserRepository masterUserRepository;
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public PlayerResponse createPlayer(Long userId, Long adminUserId, Long parentId) {
@@ -48,7 +49,7 @@ public class PlayerService {
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
     public List<PlayerResponse> getPlayersByAdmin(Long adminUserId) {
         return playerRepository.findByAdminUserId(adminUserId).stream()
-                .map(tenantMapper::toDto)
+                .map(player -> withNames(tenantMapper.toDto(player)))
                 .toList();
     }
 
@@ -57,6 +58,24 @@ public class PlayerService {
         return playerRepository.findByParentId(parentId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
+    }
+
+    private PlayerResponse withNames(PlayerResponse dto) {
+        if (dto == null || dto.userId() == null) return dto;
+        return masterUserRepository.findById(dto.userId())
+                .map(user -> PlayerResponse.builder()
+                        .id(dto.id())
+                        .userId(dto.userId())
+                        .adminUserId(dto.adminUserId())
+                        .parentId(dto.parentId())
+                        .balance(dto.balance())
+                        .frozenBalance(dto.frozenBalance())
+                        .firstName(user.getFirstName())
+                        .lastName(user.getLastName())
+                        .username(user.getUsername())
+                        .createdAt(dto.createdAt())
+                        .build())
+                .orElse(dto);
     }
 
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)

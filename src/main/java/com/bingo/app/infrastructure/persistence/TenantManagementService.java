@@ -165,6 +165,16 @@ public class TenantManagementService {
 
             stmt.execute("CREATE SCHEMA IF NOT EXISTS public");
 
+            try {
+                stmt.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS deposit_account_info TEXT");
+            } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("already exists")) {
+                    // column already present
+                } else {
+                    throw e;
+                }
+            }
+
             stmt.execute("""
                 CREATE TABLE IF NOT EXISTS tenant_registry (
                     id BIGSERIAL PRIMARY KEY,

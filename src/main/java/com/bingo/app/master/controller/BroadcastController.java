@@ -1,6 +1,7 @@
 package com.bingo.app.master.controller;
 
 import com.bingo.app.bot.BingoTelegramBot;
+import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.master.dto.request.BroadcastRequest;
 import com.bingo.app.master.dto.response.AdminListItem;
 import com.bingo.app.master.enums.Role;
@@ -10,6 +11,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,9 +32,15 @@ public class BroadcastController {
     private final UserService userService;
 
     @PostMapping
-    @PreAuthorize("hasRole('SUPER_ADMIN')")
-    public ApiResponse<String> broadcast(@Valid @RequestBody BroadcastRequest request) {
-        List<AdminListItem> recipients = resolveRecipients(request.target());
+    @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
+    public ApiResponse<String> broadcast(@Valid @RequestBody BroadcastRequest request,
+                                         @AuthenticationPrincipal UserPrincipal principal) {
+        boolean isSuperAdmin = principal.getUser().getRole() == Role.SUPER_ADMIN;
+        List<AdminListItem> recipients = resolveRecipients(request.target(), principal, isSuperAdmin);
+
+        if (recipients.isEmpty()) {
+            return ApiResponse.ok("No recipients found for target: " + request.target());
+        }
 
         int sent = 0;
         int failed = 0;
@@ -53,15 +61,21 @@ public class BroadcastController {
         return ApiResponse.ok("Broadcast sent to " + sent + " user(s)" + (failed > 0 ? ", " + failed + " failed" : ""));
     }
 
-    private List<AdminListItem> resolveRecipients(String target) {
-        return switch (target.toLowerCase()) {
-            case "agents" -> userService.findAllByRole(Role.ADMIN);
-            case "players" -> userService.findAllByRole(Role.PLAYER);
-            default -> {
-                List<AdminListItem> all = new ArrayList<>(userService.findAllByRole(Role.ADMIN));
-                all.addAll(userService.findAllByRole(Role.PLAYER));
-                yield all;
-            }
-        };
+    private List<AdminListItem> resolveRecipients(String target, UserPrincipal principal, boolean isSuperAdmin) {
+        if (isSuperAdmin) {
+            return switch (target.toLowerCase()) {
+                case "agents" -> userService.findAllByRole(Role.ADMIN);
+                case "players" -> userService.findAllByRole(Role.PLAYER);
+                default -> {
+                    List<AdminListItem> all = new ArrayList<>(userService.findAllByRole(Role.ADMIN));
+                    all.addAll(userService.findAllByRole(Role.PLAYER));
+                    yield all;
+                }
+            };
+        }
+
+        // Admin: can only broadcast to their own players
+        Long adminUserId = principal.getUser().getId();
+        return userService.findAllByAdminUserId(adminUserId);
     }
 }

@@ -4,6 +4,7 @@ import com.bingo.app.infrastructure.persistence.TenantHelper;
 import com.bingo.app.master.dto.response.UserProfileResponse;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
+import com.bingo.app.master.repository.UserRepository;
 import com.bingo.app.tenant.entity.Player;
 import com.bingo.app.tenant.repository.PlayerRepository;
 import lombok.RequiredArgsConstructor;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 public class UserProfileService {
 
     private final PlayerRepository playerRepository;
+    private final UserRepository userRepository;
 
     /**
      * Builds the API profile for a user. Players keep their money in the owning
@@ -36,9 +38,17 @@ public class UserProfileService {
             return profile;
         }
 
+        String depositInfo = null;
+        if (user.getAdminUserId() != null) {
+            depositInfo = userRepository.findById(user.getAdminUserId())
+                    .map(User::getDepositAccountInfo)
+                    .orElse(null);
+        }
+
         return profile.toBuilder()
                 .balance(player.getBalance())
                 .frozenBalance(player.getFrozenBalance())
+                .depositAccountInfo(depositInfo)
                 .build();
     }
 }

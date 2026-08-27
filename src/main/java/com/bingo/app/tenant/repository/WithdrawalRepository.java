@@ -20,6 +20,9 @@ public interface WithdrawalRepository extends JpaRepository<Withdrawal, Long> {
 
     List<Withdrawal> findByStatus(RequestStatus status);
 
+    @Query("SELECT COUNT(w) FROM Withdrawal w WHERE w.userId IN :userIds AND w.status = :status")
+    long countByUserIdInAndStatus(@Param("userIds") List<Long> userIds, @Param("status") RequestStatus status);
+
     List<Withdrawal> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     /**

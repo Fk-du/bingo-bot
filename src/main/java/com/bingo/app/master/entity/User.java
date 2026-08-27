@@ -57,6 +57,10 @@ public class User implements UserDetails {
     @Column(name = "business_name")
     private String businessName;
 
+    /** Agent's deposit account info shown to players (e.g. TeleBirr number). */
+    @Column(name = "deposit_account_info", columnDefinition = "TEXT")
+    private String depositAccountInfo;
+
     /** Super-admin onboarding approval — meaningful for {@link Role#ADMIN}. */
     @Builder.Default
     @Column(name = "admin_approved")

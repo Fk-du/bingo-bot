@@ -174,7 +174,7 @@ public class GameController {
             case PLAYER -> {
                 Long adminUserId = AdminIds.adminUserId(user);
                 if (adminUserId == null) return ApiResponse.ok(List.of());
-                return ApiResponse.ok(gameService.findOpenGamesForAdmin(adminUserId));
+                return ApiResponse.ok(gameService.findOpenGamesForPlayer(adminUserId, user.getId()));
             }
             default -> {
                 return ApiResponse.ok(List.of());

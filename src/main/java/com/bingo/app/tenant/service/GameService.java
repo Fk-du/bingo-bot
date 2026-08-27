@@ -98,7 +98,27 @@ public class GameService {
                 List.of(GameStatus.REGISTRATION_OPEN, GameStatus.STARTING, GameStatus.IN_PROGRESS,
                         GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
                 .stream()
-                .map(tenantMapper::toDto)
+                .map(game -> tenantMapper.toDto(game).toBuilder()
+                        .registeredPlayers(gameCardRepository.countByGameId(game.getId()))
+                        .build())
+                .toList();
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public List<GameResponse> findOpenGamesForPlayer(Long adminUserId, Long playerId) {
+        Long activeGameId = gameCardRepository.findByPlayerIdAndActiveGames(playerId).stream()
+                .findFirst()
+                .map(GameCard::getGameId)
+                .orElse(null);
+
+        return gameRepository.findAllByAdminUserIdAndStatusIn(adminUserId,
+                List.of(GameStatus.REGISTRATION_OPEN, GameStatus.STARTING, GameStatus.IN_PROGRESS,
+                        GameStatus.PAUSED, GameStatus.CLAIM_PENDING))
+                .stream()
+                .map(game -> tenantMapper.toDto(game).toBuilder()
+                        .registered(gameCardRepository.existsByGameIdAndPlayerId(game.getId(), playerId))
+                        .activeGameId(activeGameId)
+                        .build())
                 .toList();
     }
 
@@ -210,6 +230,18 @@ public class GameService {
         return gameRepository.findAllByAdminUserIdOrderByCreatedAtDesc(adminUserId).stream()
                 .map(tenantMapper::toDto)
                 .toList();
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public long countGamesForAdmin(Long adminUserId) {
+        return gameRepository.countByAdminUserIdAndStatusIn(adminUserId, List.of(
+                GameStatus.REGISTRATION_OPEN, GameStatus.STARTING, GameStatus.IN_PROGRESS,
+                GameStatus.PAUSED, GameStatus.CLAIM_PENDING, GameStatus.ENDED));
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public long countGamesByStatusForAdmin(Long adminUserId, List<GameStatus> statuses) {
+        return gameRepository.countByAdminUserIdAndStatusIn(adminUserId, statuses);
     }
 
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
@@ -371,8 +403,9 @@ public class GameService {
     }
 
     private static final Set<String> SUPPORTED_PATTERNS = Set.of(
-            "SINGLE_LINE", "DOUBLE_LINE", "FULL_HOUSE", "BLACKOUT", "FOUR_CORNERS",
-            "X_SHAPE", "L_SHAPE", "T_SHAPE", "POSTAGE_STAMP");
+            "SINGLE_LINE", "DOUBLE_LINE", "TRIPLE_LINE", "FULL_HOUSE", "BLACKOUT", "FOUR_CORNERS",
+            "X_SHAPE", "L_SHAPE", "T_SHAPE", "POSTAGE_STAMP",
+            "PLUS", "FRAME", "DIAMOND", "Z_SHAPE");
 
     private String normalizePattern(String pattern) {
         String value = pattern != null ? pattern : "SINGLE_LINE";

@@ -19,6 +19,8 @@ public interface AdminFundRequestRepository extends JpaRepository<AdminFundReque
 
     List<AdminFundRequest> findByStatusOrderByCreatedAtDesc(FundStatus status);
 
+    long countByAdminUserIdAndStatus(Long adminUserId, FundStatus status);
+
     List<AdminFundRequest> findAllByOrderByCreatedAtDesc();
 
     /**

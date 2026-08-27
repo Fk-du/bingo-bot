@@ -40,13 +40,17 @@ public class TelegramAuthService {
      * it for a grace window (30 s) so concurrent requests work. After the window
      * closes we reject any request whose auth_date is not strictly newer.
      */
-    private static final long AUTH_DATE_GRACE_MS = 30_000L;
+    private static final long AUTH_DATE_GRACE_MS = 300_000L;
     private final ConcurrentHashMap<Long, long[]> authDateTracker = new ConcurrentHashMap<>(); // {auth_date_sec, first_seen_ms}
 
     @Value("${app.telegram.bot.token}")
     private String botToken;
 
     public User authenticate(String initData) {
+        return authenticate(initData, null);
+    }
+
+    public User authenticate(String initData, String startParam) {
         try {
             log.debug("Authenticating with initData length={}", initData != null ? initData.length() : 0);
 
@@ -118,7 +122,16 @@ public class TelegramAuthService {
                 }
             }
 
-            return userService.findOrCreateUser(telegramId, username, firstName, lastName);
+            // Resolve start_param: prefer explicit parameter, fallback to initData
+            String resolvedStartParam = startParam;
+            if (resolvedStartParam == null || resolvedStartParam.isBlank()) {
+                resolvedStartParam = rawParams.get("start_param");
+                if (resolvedStartParam != null && resolvedStartParam.isBlank()) {
+                    resolvedStartParam = null;
+                }
+            }
+
+            return userService.findOrCreateUser(telegramId, username, firstName, lastName, resolvedStartParam);
 
         } catch (Exception e) {
             log.error("Authentication error: {} [{}]", e.getMessage(), e.getClass().getSimpleName(), e);

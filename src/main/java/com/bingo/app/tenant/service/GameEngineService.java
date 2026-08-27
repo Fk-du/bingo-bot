@@ -696,6 +696,7 @@ public class GameEngineService {
      *
      * SINGLE_LINE: any one of the 12 line patterns (rows, columns, diagonals) is complete.
      * DOUBLE_LINE: at least two distinct line patterns are complete.
+     * TRIPLE_LINE: at least three distinct line patterns are complete.
      * FULL_HOUSE:  all 24 non-free cells are called.
      * FOUR_CORNERS: the four corner cells are called.
      * BLACKOUT: same as FULL_HOUSE (alias).
@@ -703,6 +704,10 @@ public class GameEngineService {
      * T_SHAPE: top row + third column complete.
      * X_SHAPE: both diagonals complete.
      * POSTAGE_STAMP: any 2x2 block in a corner is complete.
+     * PLUS: middle row + middle column complete.
+     * FRAME: all outer border cells complete.
+     * DIAMOND: the four cells diagonally adjacent to the centre are complete.
+     * Z_SHAPE: top row + main diagonal + bottom row complete.
      */
     boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
         Set<Integer> calledSet = new HashSet<>(calledNumbers);
@@ -769,6 +774,55 @@ public class GameEngineService {
                     || is2x2Complete(cardNumbers, calledSet, 3, 3);
         }
 
+        if ("PLUS".equals(pattern)) {
+            // Middle row (2,0-4) + middle column (0-4,2)
+            boolean middleRow = true, middleCol = true;
+            for (int col = 0; col < 5; col++) {
+                if (!calledSet.contains(cardNumbers[2][col])) middleRow = false;
+            }
+            for (int row = 0; row < 5; row++) {
+                if (!calledSet.contains(cardNumbers[row][2])) middleCol = false;
+            }
+            return middleRow && middleCol;
+        }
+
+        if ("FRAME".equals(pattern)) {
+            // All outer border cells
+            int[][] frame = {
+                    {0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4},
+                    {4, 0}, {4, 1}, {4, 2}, {4, 3}, {4, 4},
+                    {1, 0}, {2, 0}, {3, 0},
+                    {1, 4}, {2, 4}, {3, 4}
+            };
+            for (int[] cell : frame) {
+                if (!calledSet.contains(cardNumbers[cell[0]][cell[1]])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if ("DIAMOND".equals(pattern)) {
+            // The four cells diagonally adjacent to the (free) center
+            return calledSet.contains(cardNumbers[1][1])
+                    && calledSet.contains(cardNumbers[1][3])
+                    && calledSet.contains(cardNumbers[3][1])
+                    && calledSet.contains(cardNumbers[3][3]);
+        }
+
+        if ("Z_SHAPE".equals(pattern)) {
+            // Top row + main diagonal + bottom row
+            boolean topRow = true, bottomRow = true, diag = true;
+            for (int col = 0; col < 5; col++) {
+                if (!calledSet.contains(cardNumbers[0][col])) topRow = false;
+                if (!calledSet.contains(cardNumbers[4][col])) bottomRow = false;
+            }
+            for (int i = 1; i < 4; i++) {
+                if (!calledSet.contains(cardNumbers[i][i])) diag = false;
+            }
+            return topRow && bottomRow && diag;
+        }
+
         int completedLines = 0;
         for (int[] winPattern : WINNING_PATTERNS) {
             boolean lineComplete = true;
@@ -787,6 +841,7 @@ public class GameEngineService {
 
         return switch (pattern != null ? pattern : "SINGLE_LINE") {
             case "DOUBLE_LINE" -> completedLines >= 2;
+            case "TRIPLE_LINE" -> completedLines >= 3;
             default -> completedLines >= 1;
         };
     }

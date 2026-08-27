@@ -23,7 +23,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public ApiResponse<UserProfileResponse> login(@Valid @RequestBody LoginRequest request) {
-        User user = telegramAuthService.authenticate(request.initData());
+        User user = telegramAuthService.authenticate(request.initData(), request.startParam());
         if (user == null) {
             return ApiResponse.error("Authentication failed");
         }

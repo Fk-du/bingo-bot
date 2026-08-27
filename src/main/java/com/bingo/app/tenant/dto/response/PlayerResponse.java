@@ -13,5 +13,8 @@ public record PlayerResponse(
         Long parentId,
         BigDecimal balance,
         BigDecimal frozenBalance,
+        String firstName,
+        String lastName,
+        String username,
         LocalDateTime createdAt
 ) {}

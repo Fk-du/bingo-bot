@@ -86,7 +86,8 @@ public class WalletService {
         }
 
         if (player.getBalance().compareTo(amount) < 0) {
-            throw new WalletException("Insufficient balance");
+            throw new WalletException("Insufficient balance",
+                    "Your balance is " + player.getBalance().toPlainString() + " coins. You requested " + amount.toPlainString() + ".");
         }
 
         playerService.freezeBalance(playerId, amount);
@@ -340,6 +341,22 @@ public class WalletService {
         return coinRequestRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING).stream()
                 .map(tenantMapper::toDto)
                 .toList();
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public long countPendingCoinRequestsForAdmin(Long adminUserId) {
+        List<Player> players = playerRepository.findByAdminUserId(adminUserId);
+        List<Long> playerIds = players.stream().map(Player::getUserId).toList();
+        if (playerIds.isEmpty()) return 0L;
+        return coinRequestRepository.countByUserIdInAndStatus(playerIds, RequestStatus.PENDING);
+    }
+
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public long countPendingWithdrawalsForAdmin(Long adminUserId) {
+        List<Player> players = playerRepository.findByAdminUserId(adminUserId);
+        List<Long> playerIds = players.stream().map(Player::getUserId).toList();
+        if (playerIds.isEmpty()) return 0L;
+        return withdrawalRepository.countByUserIdInAndStatus(playerIds, RequestStatus.PENDING);
     }
 
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)

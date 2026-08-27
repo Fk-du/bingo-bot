@@ -2,8 +2,10 @@ package com.bingo.app.master.controller;
 
 import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.common.dto.ApiResponse;
+import com.bingo.app.master.dto.response.DashboardSummaryResponse;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.repository.UserRepository;
+import com.bingo.app.master.service.DashboardService;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.service.GameService;
 import com.bingo.app.tenant.service.WalletService;
@@ -25,6 +27,13 @@ public class ReportController {
     private final GameService gameService;
     private final WalletService walletService;
     private final UserRepository userRepository;
+    private final DashboardService dashboardService;
+
+    @GetMapping("/dashboard")
+    @PreAuthorize("hasAnyRole('ADMIN')")
+    public ApiResponse<DashboardSummaryResponse> dashboard(@AuthenticationPrincipal UserPrincipal principal) {
+        return ApiResponse.ok(dashboardService.summaryForAdmin(principal.getUser()));
+    }
 
     @GetMapping("/revenue")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
