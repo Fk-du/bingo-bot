@@ -17,6 +17,8 @@ public record AdminGameStateResponse(
         Integer totalNumbersCalled,
         BigDecimal prizePool,
         String winningPattern,
+        String customPatternName,
+        String customPatternCells,
         Integer callInterval,
         BigDecimal commissionPercent,
         boolean autoMark,

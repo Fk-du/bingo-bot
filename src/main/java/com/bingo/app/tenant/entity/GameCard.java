@@ -40,6 +40,13 @@ public class GameCard {
     @Column(name = "marked_numbers")
     private String markedNumbers;
 
+    /**
+     * Per-player auto-mark preference (null = follow the game's setting).
+     * True -> called numbers are highlighted automatically; False -> the player daubs.
+     */
+    @Column(name = "auto_mark")
+    private Boolean autoMark;
+
     @Builder.Default
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();

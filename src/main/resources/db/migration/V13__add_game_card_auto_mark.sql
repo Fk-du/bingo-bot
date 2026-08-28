@@ -1,0 +1,1 @@
+ALTER TABLE game_cards ADD COLUMN IF NOT EXISTS auto_mark BOOLEAN;

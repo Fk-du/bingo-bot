@@ -16,6 +16,8 @@ public record GameStateResponse(
         List<Integer> calledNumbers,
         List<String> calledNumbersLabeled,
         String winningPattern,
+        String customPatternName,
+        String customPatternCells,
         boolean autoMark,
         java.math.BigDecimal commissionPercent,
         java.util.List<Integer> markedNumbers,
