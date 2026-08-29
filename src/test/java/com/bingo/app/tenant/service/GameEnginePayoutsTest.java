@@ -27,7 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.LocalDateTime;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -168,13 +168,40 @@ class GameEnginePayoutsTest {
                         .build()));
         when(bingoClaimRepository.save(any(BingoClaim.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        var result = engine.claimBingo(g.getId(), 101L, null);
+        var result = engine.claimBingo(g.getId(), 101L, Collections.<Integer>emptyList(), false);
 
         assertTrue(result.isValid() || result.isPendingReview(),
                 "a completed SINGLE_LINE must be accepted");
         assertEquals(com.bingo.app.tenant.enums.GameStatus.CLAIM_PENDING, g.getStatus());
         // no money moves until the admin approves
         verifyNoInteractions(walletService);
+    }
+
+    @Test
+    @DisplayName("rejected claim does not ban the player and resumes the game")
+    void rejectClaimDoesNotBanPlayer() {
+        Game g = game(33L, new BigDecimal("20.00"), "10.00");
+        BingoClaim claim = claim(7L, 101L);
+        claim.setGameId(g.getId());
+
+        when(gameRepository.findByIdForUpdate(g.getId())).thenReturn(Optional.of(g));
+        when(gameRepository.findById(g.getId())).thenReturn(Optional.of(g));
+        when(bingoClaimRepository.findById(7L)).thenReturn(Optional.of(claim));
+        when(bingoClaimRepository.claimForProcessing(eq(7L), eq(2L), any(LocalDateTime.class))).thenReturn(1);
+        when(bingoClaimRepository.countByGameIdAndResultAndValidatedAtIsNull(g.getId(), "VALID")).thenReturn(0L);
+        when(bingoClaimRepository.save(any(BingoClaim.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(gameRepository.save(any(Game.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        engine.rejectClaim(g.getId(), 7L, 2L, "invalid pattern");
+
+        assertAll(
+                () -> assertEquals("REJECTED", claim.getResult()),
+                () -> assertEquals("invalid pattern", claim.getRejectionReason()),
+                () -> assertEquals(com.bingo.app.tenant.enums.GameStatus.IN_PROGRESS, g.getStatus())
+        );
+        verify(gameCardRepository, never()).findByGameIdAndPlayerId(anyLong(), anyLong());
+        verify(gameCardRepository, never()).save(any(GameCard.class));
+        verify(bingoClaimRepository).save(claim);
     }
 
     @Test

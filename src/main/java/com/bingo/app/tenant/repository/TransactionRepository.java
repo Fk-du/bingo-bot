@@ -18,4 +18,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Optional<Transaction> findByReferenceIdAndType(Long referenceId, String type);
 
     List<Transaction> findByUserIdAndType(Long userId, String type);
+
+    List<Transaction> findAllByReferenceIdAndType(Long referenceId, String type);
 }

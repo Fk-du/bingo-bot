@@ -13,4 +13,9 @@ import java.util.List;
 @Data
 public class ClaimBingoRequest {
     private List<Integer> markedNumbers;
+    /**
+     * The player's own auto-mark preference for this game (null = not changing).
+     * Sent with the marks endpoint to persist, and with the claim endpoint to control validation.
+     */
+    private Boolean autoMark;
 }

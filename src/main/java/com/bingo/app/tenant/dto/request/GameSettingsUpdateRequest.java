@@ -15,6 +15,8 @@ public record GameSettingsUpdateRequest(
         @Max(value = 300, message = "Call interval cannot exceed 300 seconds")
         Integer callInterval,
         String winningPattern,
+        String customPatternName,
+        String customPatternCells,
         @DecimalMin(value = "1", message = "Commission must be at least 1%")
         @DecimalMax(value = "90", message = "Commission cannot exceed 90%")
         BigDecimal commissionPercent,

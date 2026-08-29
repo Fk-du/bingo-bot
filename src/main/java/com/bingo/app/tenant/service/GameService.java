@@ -59,12 +59,13 @@ public class GameService {
                 .currentCallIndex(0)
                 .totalNumbersCalled(0)
                 .prizePool(BigDecimal.ZERO)
-                .winningPattern(normalizePattern(request.getWinningPattern()))
                 .autoMark(request.getAutoMark() == null || request.getAutoMark())
                 .callInterval(request.getCallInterval() != null ? request.getCallInterval() : 5)
                 .commissionPercent(request.getCommissionPercent() != null ? request.getCommissionPercent() : new BigDecimal("10.00"))
                 .createdAt(LocalDateTime.now())
                 .build();
+
+        applyPattern(game, request.getWinningPattern(), request.getCustomPatternName(), request.getCustomPatternCells());
 
         Game saved = gameRepository.save(game);
         log.info("Game created: id={}, adminUserId={}, entryFee={}", saved.getId(), adminUserId, request.getEntryFee());
@@ -272,7 +273,7 @@ public class GameService {
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
-    public GameResponse updateGameSettings(Long gameId, Long adminUserId, Integer maxPlayers, Integer callInterval, String winningPattern, java.math.BigDecimal commissionPercent, Boolean autoMark) {
+    public GameResponse updateGameSettings(Long gameId, Long adminUserId, Integer maxPlayers, Integer callInterval, String winningPattern, String customPatternName, String customPatternCells, java.math.BigDecimal commissionPercent, Boolean autoMark) {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new GameProgressException("Game not found", "Game not found."));
 
@@ -293,7 +294,7 @@ public class GameService {
             game.setCallInterval(callInterval);
         }
         if (winningPattern != null) {
-            game.setWinningPattern(normalizePattern(winningPattern));
+            applyPattern(game, winningPattern, customPatternName, customPatternCells);
         }
         if (commissionPercent != null) {
             if (commissionPercent.compareTo(java.math.BigDecimal.ZERO) < 0
@@ -407,8 +408,44 @@ public class GameService {
             "X_SHAPE", "L_SHAPE", "T_SHAPE", "POSTAGE_STAMP",
             "PLUS", "FRAME", "DIAMOND", "Z_SHAPE");
 
+    private void applyPattern(Game game, String pattern, String customName, String customCells) {
+        if ("CUSTOM".equals(pattern)) {
+            validateCustomPattern(customName, customCells);
+            game.setWinningPattern("CUSTOM");
+            game.setCustomPatternName(customName.trim());
+            game.setCustomPatternCells(customCells);
+        } else {
+            game.setWinningPattern(normalizePattern(pattern));
+            game.setCustomPatternName(null);
+            game.setCustomPatternCells(null);
+        }
+    }
+
+    private void validateCustomPattern(String customName, String customCells) {
+        if (customName == null || customName.trim().isEmpty()) {
+            throw new GameProgressException("Custom pattern requires a name",
+                    "Give your custom pattern a name.");
+        }
+        if (customCells == null || customCells.trim().isEmpty()) {
+            throw new GameProgressException("Custom pattern requires cells",
+                    "Draw a pattern on the board first.");
+        }
+        normalizePattern("CUSTOM", customName, customCells);
+    }
+
     private String normalizePattern(String pattern) {
+        return normalizePattern(pattern, null, null);
+    }
+
+    private String normalizePattern(String pattern, String customName, String customCells) {
         String value = pattern != null ? pattern : "SINGLE_LINE";
+        if ("CUSTOM".equals(value)) {
+            if (customCells == null || customCells.trim().isEmpty()) {
+                throw new GameProgressException("Custom pattern requires cells",
+                        "Draw a pattern on the board first.");
+            }
+            return value;
+        }
         if (!SUPPORTED_PATTERNS.contains(value)) {
             throw new GameProgressException("Unsupported winning pattern: " + value,
                     "Unknown winning pattern. Pick one from the list.");

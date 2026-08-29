@@ -72,7 +72,9 @@ public class GameController {
             @PathVariable Long id,
             @Valid @RequestBody GameSettingsUpdateRequest request) {
         var game = gameService.updateGameSettings(id, principal.getUser().getId(),
-                request.maxPlayers(), request.callInterval(), request.winningPattern(), request.commissionPercent(), request.autoMark());
+                request.maxPlayers(), request.callInterval(), request.winningPattern(),
+                request.customPatternName(), request.customPatternCells(),
+                request.commissionPercent(), request.autoMark());
         return ApiResponse.ok("Game settings updated", game);
     }
 
@@ -201,7 +203,8 @@ public class GameController {
             @PathVariable Long id,
             @RequestBody(required = false) ClaimBingoRequest request) throws JsonProcessingException {
         var result = gameEngineService.claimBingo(id, principal.getUser().getId(),
-                request == null ? null : request.getMarkedNumbers());
+                request == null ? null : request.getMarkedNumbers(),
+                request == null ? null : request.getAutoMark());
         String message;
         if (result.isBanned()) {
             message = "Invalid Bingo claim — you have been banned from this game";
@@ -243,7 +246,7 @@ public class GameController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id,
             @RequestBody ClaimBingoRequest request) {
-        gameEngineService.saveMarks(id, principal.getUser().getId(), request.getMarkedNumbers());
+        gameEngineService.saveMarks(id, principal.getUser().getId(), request.getMarkedNumbers(), request.getAutoMark());
         return ApiResponse.ok("Marks saved", null);
     }
 

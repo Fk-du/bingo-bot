@@ -1,0 +1,2 @@
+ALTER TABLE games ADD COLUMN IF NOT EXISTS custom_pattern_name VARCHAR(255);
+ALTER TABLE games ADD COLUMN IF NOT EXISTS custom_pattern_cells TEXT;

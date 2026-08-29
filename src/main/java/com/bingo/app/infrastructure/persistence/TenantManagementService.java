@@ -33,7 +33,9 @@ public class TenantManagementService {
             "db/migration/V8__add_game_fairness_hash.sql",
             "db/migration/V9__add_game_auto_mark.sql",
             "db/migration/V10__add_game_card_marked_numbers.sql",
-            "db/migration/V11__add_race_condition_constraints.sql"
+            "db/migration/V11__add_race_condition_constraints.sql",
+            "db/migration/V12__add_game_custom_pattern.sql",
+            "db/migration/V13__add_game_card_auto_mark.sql"
     );
 
     private final TenantRegistryRepository tenantRegistryRepository;

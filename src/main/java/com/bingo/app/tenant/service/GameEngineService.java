@@ -399,10 +399,11 @@ public class GameEngineService {
 
     /**
      * Claim Bingo for a player — allows multiple simultaneous claims.
-     * Invalid claims result in an immediate ban from the game (game continues).
+     * No server-side validation/ban occurs here; validity is determined by the
+     * admin during claim review (approve/reject).
      */
     @Transactional(transactionManager = "tenantTransactionManager")
-    public BingoClaimResult claimBingo(Long gameId, Long playerId, java.util.List<Integer> markedNumbers) throws JsonProcessingException {
+    public BingoClaimResult claimBingo(Long gameId, Long playerId, java.util.List<Integer> markedNumbers, Boolean autoMark) throws JsonProcessingException {
         Game game = gameRepository.findByIdForUpdate(gameId)
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
@@ -430,52 +431,15 @@ public class GameEngineService {
 
         // Get card numbers
         Card card = gameCard.getCard();
-        int[][] cardNumbers = parseCardNumbers(card.getNumbers());
 
-        // Validate Bingo server-side. With auto-mark disabled the player must have
-        // daubed the pattern themselves: every marked cell must really be called
-        // (or the free spot) and the marks alone must complete the pattern.
-        boolean isValid;
-        if (Boolean.FALSE.equals(game.getAutoMark())) {
-            // Prefer freshly sent marks; otherwise fall back to the daubs persisted on the card
-            java.util.List<Integer> effectiveMarks = (markedNumbers != null && !markedNumbers.isEmpty())
-                    ? markedNumbers
-                    : parseMarkedNumbers(gameCard);
-            if (effectiveMarks.isEmpty()) {
-                isValid = false;
-            } else {
-                java.util.Set<Integer> calledSet = new java.util.HashSet<>(calledNumbers);
-                boolean marksLegit = effectiveMarks.stream()
-                        .allMatch(n -> n == null || n == 0 || calledSet.contains(n));
-                isValid = marksLegit && validateBingo(cardNumbers, effectiveMarks, game.getWinningPattern());
-            }
-        } else {
-            isValid = validateBingo(cardNumbers, calledNumbers, game.getWinningPattern());
-        }
-
-        if (!isValid) {
-            bingoClaimRepository.save(BingoClaim.builder()
-                    .gameId(gameId)
-                    .playerId(playerId)
-                    .cardId(card.getId())
-                    .cardSnapshot(card.getNumbers())
-                    .calledNumbersSnapshot(objectMapper.writeValueAsString(calledNumbers))
-                    .result("INVALID")
-                    .rewardAmount(BigDecimal.ZERO)
-                    .validatedAt(LocalDateTime.now())
-                    .claimedAt(LocalDateTime.now())
-                    .build());
-
-            gameCard.setBanned(true);
+        // Persist the player's auto-mark preference if sent with the claim.
+        if (autoMark != null) {
+            gameCard.setAutoMark(autoMark);
             gameCardRepository.save(gameCard);
-
-            log.warn("Player {} banned from game {} — invalid Bingo claim", playerId, gameId);
-
-            return BingoClaimResult.builder()
-                    .valid(false)
-                    .banned(true)
-                    .build();
         }
+
+        // No server-side validation here — determining whether the claim is a valid
+        // Bingo is the admin's responsibility via claim review (approve/reject).
 
         // Pause on first claim only
         boolean firstClaim = game.getStatus() == GameStatus.IN_PROGRESS;
@@ -630,13 +594,6 @@ public class GameEngineService {
         claim.setRejectionReason(reason);
         bingoClaimRepository.save(claim);
 
-        // An admin-rejected claim bans the player for the rest of this game
-        gameCardRepository.findByGameIdAndPlayerId(gameId, claim.getPlayerId()).ifPresent(gc -> {
-            gc.setBanned(true);
-            gameCardRepository.save(gc);
-        });
-        log.info("Game {}: Player {} banned from the game (claim {} rejected).", gameId, claim.getPlayerId(), claimId);
-
         // Resume game only if no other valid pending claims
         long remaining = bingoClaimRepository.countByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
         if (remaining == 0) {
@@ -710,8 +667,27 @@ public class GameEngineService {
      * Z_SHAPE: top row + main diagonal + bottom row complete.
      */
     boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern) {
+        return validateBingo(cardNumbers, calledNumbers, pattern, null);
+    }
+
+    boolean validateBingo(int[][] cardNumbers, List<Integer> calledNumbers, String pattern, String customCellsJson) {
         Set<Integer> calledSet = new HashSet<>(calledNumbers);
         calledSet.add(0);
+
+        if ("CUSTOM".equals(pattern)) {
+            List<int[]> cells = parseCustomCells(customCellsJson);
+            if (cells.isEmpty()) {
+                return false;
+            }
+            for (int[] cell : cells) {
+                int r = cell[0], c = cell[1];
+                if (r == 2 && c == 2) continue; // free centre
+                if (!calledSet.contains(cardNumbers[r][c])) {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         if ("FULL_HOUSE".equals(pattern) || "BLACKOUT".equals(pattern)) {
             for (int row = 0; row < 5; row++) {
@@ -866,6 +842,29 @@ public class GameEngineService {
     }
 
     /**
+     * Parse a custom pattern's [[row,col],...] cells from JSON.
+     */
+    private List<int[]> parseCustomCells(String cellsJson) {
+        if (cellsJson == null || cellsJson.trim().isEmpty()) {
+            return List.of();
+        }
+        try {
+            int[][] cells = objectMapper.readValue(cellsJson, int[][].class);
+            if (cells == null) return List.of();
+            java.util.List<int[]> result = new java.util.ArrayList<>();
+            for (int[] cell : cells) {
+                if (cell.length == 2 && cell[0] >= 0 && cell[0] < 5 && cell[1] >= 0 && cell[1] < 5) {
+                    result.add(cell);
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to parse custom pattern cells: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * Get current game state for a player
      */
     @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
@@ -896,11 +895,16 @@ public class GameEngineService {
                 .hasPlayerCard(gameCard != null)
                 .isWinner(gameCard != null && gameCard.isWinner())
                 .isBanned(gameCard != null && gameCard.isBanned())
-                .autoMark(!Boolean.FALSE.equals(game.getAutoMark()))
+                .autoMark(Boolean.TRUE.equals(
+                        (gameCard != null && gameCard.getAutoMark() != null)
+                                ? gameCard.getAutoMark()
+                                : game.getAutoMark()))
                 .commissionPercent(game.getCommissionPercent())
                 .markedNumbers(parseMarkedNumbers(gameCard))
                 .startTime(game.getStartTime())
                 .winningPattern(game.getWinningPattern())
+                .customPatternName(game.getCustomPatternName())
+                .customPatternCells(game.getCustomPatternCells())
                 .fairnessHash(game.getFairnessHash())
                 .build();
     }
@@ -954,17 +958,26 @@ public class GameEngineService {
      * Every mark must correspond to an already-called number (or the free spot).
      */
     @Transactional(transactionManager = "tenantTransactionManager")
-    public void saveMarks(Long gameId, Long playerId, java.util.List<Integer> markedNumbers) {
+    public void saveMarks(Long gameId, Long playerId, java.util.List<Integer> markedNumbers, Boolean autoMark) {
         if (markedNumbers == null) {
             markedNumbers = java.util.List.of();
         }
         GameCard gameCard = gameCardRepository.findByGameIdAndPlayerId(gameId, playerId)
                 .orElseThrow(() -> new RuntimeException("Player not registered for this game"));
 
-        if (Boolean.TRUE.equals(gameRepository.findById(gameId)
-                .map(Game::getAutoMark).orElse(true))) {
+        // Persist the player's auto-mark preference (null = follow the game default).
+        if (autoMark != null) {
+            gameCard.setAutoMark(autoMark);
+            gameCardRepository.save(gameCard);
+        }
+
+        boolean effectiveAutoMark = Boolean.TRUE.equals(gameCard.getAutoMark() != null
+                ? gameCard.getAutoMark()
+                : gameRepository.findById(gameId).map(Game::getAutoMark).orElse(true));
+
+        if (effectiveAutoMark) {
             throw new GameProgressException("Game uses auto-marking",
-                    "This game marks numbers automatically.");
+                    "Your card is set to auto-mark numbers.");
         }
 
         java.util.Set<Integer> allowed = new java.util.HashSet<>(
@@ -1184,6 +1197,8 @@ public class GameEngineService {
         private java.util.List<Integer> markedNumbers;
         private java.time.LocalDateTime startTime;
         private String winningPattern;
+        private String customPatternName;
+        private String customPatternCells;
         private String fairnessHash;
     }
 }

@@ -39,9 +39,10 @@ public class ReportController {
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public ApiResponse<Map<String, Object>> revenue(@AuthenticationPrincipal UserPrincipal principal) {
         var user = principal.getUser();
-        var totalPlayers = principal.getUser().getRole() == Role.SUPER_ADMIN
-                ? userRepository.countByRole(Role.PLAYER)
-                : 0L;
+        if (user.getRole() == Role.ADMIN) {
+            return ApiResponse.ok(dashboardService.revenueForAdmin(user));
+        }
+        var totalPlayers = userRepository.countByRole(Role.PLAYER);
         var report = Map.<String, Object>of(
                 "totalGames", gameService.findAllGames().size(),
                 "totalTransactions", walletService.getAllTransactions().size(),
