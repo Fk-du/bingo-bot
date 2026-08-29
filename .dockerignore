@@ -1,0 +1,7 @@
+.env
+target
+.git
+.idea
+app.log
+app.err
+*.iml
