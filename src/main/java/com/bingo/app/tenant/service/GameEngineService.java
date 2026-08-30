@@ -2,7 +2,9 @@ package com.bingo.app.tenant.service;
 
 import com.bingo.app.infrastructure.persistence.TenantContext;
 import com.bingo.app.master.entity.TenantRegistry;
+import com.bingo.app.master.entity.User;
 import com.bingo.app.master.repository.TenantRegistryRepository;
+import com.bingo.app.master.repository.UserRepository;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.entity.*;
@@ -53,6 +55,7 @@ public class GameEngineService {
     private final SimpMessagingTemplate messagingTemplate;
     private final TenantMapper tenantMapper;
     private final TenantRegistryRepository tenantRegistryRepository;
+    private final UserRepository userRepository;
 
 
     @Value("${bingo.fees.admin-commission-percent:10}")
@@ -1042,6 +1045,41 @@ public class GameEngineService {
                 .stream()
                 .map(tenantMapper::toDto)
                 .toList();
+    }
+
+    /**
+     * Get the pending (unresolved) winning claims' card snapshots, so players other than
+     * the claimants can inspect whether each card actually completed the game.
+     */
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public List<com.bingo.app.tenant.dto.response.PendingClaimCardResponse> getPendingClaimCards(Long gameId) {
+        return bingoClaimRepository
+                .findByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID")
+                .stream()
+                .map(claim -> {
+                    String name = "Player #" + claim.getPlayerId();
+                    if (claim.getPlayerId() != null) {
+                        name = userRepository.findById(claim.getPlayerId())
+                                .map(this::displayName)
+                                .orElse(name);
+                    }
+                    return com.bingo.app.tenant.dto.response.PendingClaimCardResponse.builder()
+                            .claimId(claim.getId())
+                            .playerId(claim.getPlayerId())
+                            .playerName(name)
+                            .cardNumbers(parseCardNumbers(claim.getCardSnapshot()))
+                            .calledNumbers(calledNumberRepository.findCalledNumbersByGameId(gameId))
+                            .build();
+                })
+                .toList();
+    }
+
+    private String displayName(User user) {
+        String full = String.join(" ",
+                        user.getFirstName() == null ? "" : user.getFirstName(),
+                        user.getLastName() == null ? "" : user.getLastName())
+                .trim();
+        return full.isEmpty() ? (user.getUsername() != null ? user.getUsername() : "Player") : full;
     }
 
     /**

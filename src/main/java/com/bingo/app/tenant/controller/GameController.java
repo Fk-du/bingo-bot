@@ -12,6 +12,7 @@ import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.dto.response.BingoClaimResultResponse;
 import com.bingo.app.tenant.dto.response.GameResponse;
 import com.bingo.app.tenant.dto.response.GameStateResponse;
+import com.bingo.app.tenant.dto.response.PendingClaimCardResponse;
 import com.bingo.app.tenant.dto.response.RegisterResponse;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.tenant.service.CardService;
@@ -227,6 +228,12 @@ public class GameController {
     @PreAuthorize("hasRole('ADMIN')")
     public ApiResponse<List<BingoClaimResponse>> getPendingClaims(@PathVariable Long id) {
         return ApiResponse.ok(gameEngineService.getPendingClaims(id));
+    }
+
+    @GetMapping("/{id}/claims/cards")
+    @PreAuthorize("hasAnyRole('PLAYER', 'ADMIN')")
+    public ApiResponse<List<PendingClaimCardResponse>> getPendingClaimCards(@PathVariable Long id) {
+        return ApiResponse.ok(gameEngineService.getPendingClaimCards(id));
     }
 
     @PostMapping("/{id}/claims/{claimId}/reject")
