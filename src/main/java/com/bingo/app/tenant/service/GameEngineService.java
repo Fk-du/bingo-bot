@@ -597,6 +597,13 @@ public class GameEngineService {
         claim.setRejectionReason(reason);
         bingoClaimRepository.save(claim);
 
+        // An admin-rejected claim bans the player for the rest of this game
+        gameCardRepository.findByGameIdAndPlayerId(gameId, claim.getPlayerId()).ifPresent(gc -> {
+            gc.setBanned(true);
+            gameCardRepository.save(gc);
+        });
+        log.info("Game {}: Player {} banned from the game (claim {} rejected).", gameId, claim.getPlayerId(), claimId);
+
         // Resume game only if no other valid pending claims
         long remaining = bingoClaimRepository.countByGameIdAndResultAndValidatedAtIsNull(gameId, "VALID");
         if (remaining == 0) {

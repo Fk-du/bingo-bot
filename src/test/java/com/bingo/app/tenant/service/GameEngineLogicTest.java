@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class GameEngineLogicTest {
 
     private final GameEngineService engine = new GameEngineService(
-            null, null, null, null, null, null, null, null, null, null, null
+            null, null, null, null, null, null, null, null, null, null, null, null
     );
 
     // ===== cent-perfect equal splitting =====
