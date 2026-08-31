@@ -230,6 +230,22 @@ public class TenantManagementService {
                 )
             """);
 
+            stmt.execute("""
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    body TEXT NOT NULL,
+                    reference_type VARCHAR(50),
+                    reference_id BIGINT,
+                    read_at TIMESTAMP,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+            """);
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id)");
+            stmt.execute("CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications (user_id, read_at)");
+
             log.info("Master schema ensured");
         } catch (Exception e) {
             throw new RuntimeException("Failed to ensure master schema: " + e.getMessage(), e);

@@ -29,17 +29,20 @@ public class UserService {
     private final PlayerService playerService;
     private final MasterMapper masterMapper;
     private final ObjectProvider<InviteService> inviteServiceProvider;
+    private final NotificationService notificationService;
 
     public UserService(UserRepository userRepository,
                        TenantManagementService tenantManagementService,
                        PlayerService playerService,
                        MasterMapper masterMapper,
-                       ObjectProvider<InviteService> inviteServiceProvider) {
+                       ObjectProvider<InviteService> inviteServiceProvider,
+                       NotificationService notificationService) {
         this.userRepository = userRepository;
         this.tenantManagementService = tenantManagementService;
         this.playerService = playerService;
         this.masterMapper = masterMapper;
         this.inviteServiceProvider = inviteServiceProvider;
+        this.notificationService = notificationService;
     }
 
     @Value("${app.super-admin.telegram-id}")
@@ -126,7 +129,15 @@ public class UserService {
         }
         admin.setAdminApproved(true);
         admin.setActive(true);
-        return masterMapper.toAdminListItem(userRepository.save(admin));
+        AdminListItem result = masterMapper.toAdminListItem(userRepository.save(admin));
+
+        notificationService.notify(admin.getId(), "ADMIN_APPROVED",
+                "Account approved",
+                "Your admin account has been approved. You can now start managing your bingo room.",
+                null, null,
+                "\u2705 Account approved\nYou are now an active admin. Open the app to get started!");
+
+        return result;
     }
 
     @Transactional
@@ -138,7 +149,14 @@ public class UserService {
         }
         admin.setAdminApproved(false);
         admin.setActive(false);
-        return masterMapper.toAdminListItem(userRepository.save(admin));
+        AdminListItem result = masterMapper.toAdminListItem(userRepository.save(admin));
+
+        notificationService.notify(admin.getId(), "ADMIN_REJECTED",
+                "Account rejected",
+                "Your admin account request was rejected. Contact the platform owner for details.",
+                null, null, null);
+
+        return result;
     }
 
     public User createPlayer(CreatePlayerRequest request) {

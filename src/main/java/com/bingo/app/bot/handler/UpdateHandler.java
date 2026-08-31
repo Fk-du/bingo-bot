@@ -1,6 +1,7 @@
 package com.bingo.app.bot.handler;
 
 import com.bingo.app.master.entity.User;
+import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.service.UserService;
 import com.bingo.app.bot.callback.CallbackContext;
 import com.bingo.app.bot.callback.CallbackRouter;
@@ -22,6 +23,7 @@ public class UpdateHandler {
     private final StartCommand startCommand;
     private final CallbackRouter callbackRouter;
     private final UserService userService;
+    private final MenuService menuService;
 
     public void handle(Update update, BingoTelegramBot bot) {
         if (update == null) {
@@ -80,8 +82,22 @@ public class UpdateHandler {
             return;
         }
 
-        // Default: tell user to use /start or the menu
-        sendMessage(bot, chatId, "Welcome to BingoPlus! Use /start to get started, or open the app using the button below.");
+        // Registered user typing to the bot: never leave them stuck —
+        // just show their role menu so they can find the app.
+        User user = userService.findByTelegramId(telegramId);
+        if (user != null) {
+            String reply = user.getRole() == Role.PLAYER
+                    ? "Use the menu below to check your balance, view your active game, or open the app."
+                    : "Manage everything from the app — use the menu below to get started.";
+            TenantHelper.runWithTenant(user, () -> {
+                sendMessage(bot, chatId, reply);
+                menuService.showMenu(bot, update, user);
+            });
+            return;
+        }
+
+        // Unknown user: guide them to register via /start with an invite.
+        sendMessage(bot, chatId, "Welcome to BingoPlus! To get started, use the /start command with the invite link your admin provided.");
     }
 
     private void sendMessage(BingoTelegramBot bot, Long chatId, String text) {

@@ -33,6 +33,7 @@ public class InviteService {
     private final TenantManagementService tenantManagementService;
     private final CardService cardService;
     private final MasterMapper masterMapper;
+    private final NotificationService notificationService;
 
     /**
      * Generate an invite link for a user
@@ -157,6 +158,15 @@ public class InviteService {
 
             log.info("New player registered: id={}, telegramId={}, adminUserId={}",
                     newUser.getId(), telegramId, adminUserId);
+
+            try {
+                notificationService.notify(adminUserId, "NEW_PLAYER",
+                        "New player joined",
+                        "A new player (@" + username + ") joined your room.",
+                        "PLAYER", newUser.getId(), null);
+            } catch (Exception e) {
+                log.warn("Failed to notify admin about new player: {}", e.getMessage());
+            }
         }
 
         // Deactivate ADMIN invite codes after use (single-use per admin).

@@ -24,6 +24,7 @@ import com.bingo.app.tenant.repository.CoinRequestRepository;
 import com.bingo.app.tenant.repository.PlayerRepository;
 import com.bingo.app.tenant.repository.TransactionRepository;
 import com.bingo.app.tenant.repository.WithdrawalRepository;
+import com.bingo.app.master.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -46,6 +47,7 @@ public class WalletService {
     private final WithdrawalRepository withdrawalRepository;
     private final AdminFundRequestRepository adminFundRequestRepository;
     private final TenantMapper tenantMapper;
+    private final NotificationService notificationService;
 
     // =========================================================
     // PLAYER METHODS
@@ -53,7 +55,8 @@ public class WalletService {
 
     @Transactional(transactionManager = "tenantTransactionManager")
     public CoinRequestResponse buyPoints(Long playerId, BigDecimal amount, String screenshotUrl) {
-        playerService.findByUserId(playerId);
+        Player player = playerRepository.findByUserId(playerId)
+                .orElseThrow(() -> new WalletException("Player not found"));
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new WalletException("Amount must be positive");
@@ -71,6 +74,8 @@ public class WalletService {
 
         createTransaction(playerId, TransactionType.TOP_UP, amount,
                 TransactionStatus.PENDING, saved.getId(), "Points purchase requested");
+
+        notifyDepositRequested(player, saved);
 
         log.info("Buy points request created for player {}: amount={}", playerId, amount);
         return tenantMapper.toDto(saved);
@@ -105,6 +110,8 @@ public class WalletService {
 
         createTransaction(playerId, TransactionType.WITHDRAWAL, amount,
                 TransactionStatus.PENDING, saved.getId(), "Withdrawal request created");
+
+        notifyWithdrawalRequested(player, saved);
 
         log.info("Withdrawal request created for player {}: amount={}", playerId, amount);
         return tenantMapper.toDto(saved);
@@ -157,6 +164,8 @@ public class WalletService {
         createTransaction(playerId, TransactionType.DEPOSIT, amount,
                 TransactionStatus.COMPLETED, null, "Received from admin " + adminUserId);
 
+        notifyPlayerFunded(playerId, adminUserId, amount);
+
         log.info("Admin {} funded player {} with amount {}", adminUserId, playerId, amount);
     }
 
@@ -199,6 +208,8 @@ public class WalletService {
             transactionRepository.save(transaction);
         }
 
+        notifyWithdrawalApproved(withdrawal);
+
         log.info("Withdrawal {} approved by {}", withdrawalId, approverId);
     }
 
@@ -223,6 +234,8 @@ public class WalletService {
             transaction.setStatus(TransactionStatus.FAILED);
             transactionRepository.save(transaction);
         }
+
+        notifyWithdrawalRejected(withdrawal, reason);
 
         log.info("Withdrawal {} rejected by {}: {}", withdrawalId, approverId, reason);
     }
@@ -254,6 +267,8 @@ public class WalletService {
                 TransactionStatus.COMPLETED, null, "Funded admin " + adminUserId);
         createTransaction(adminUserId, TransactionType.DEPOSIT, amount,
                 TransactionStatus.COMPLETED, null, "Received from super admin");
+
+        notifyAdminFunded(adminUserId, amount);
 
         log.info("Super admin {} funded admin {} with amount {}", superAdminId, adminUserId, amount);
     }
@@ -303,6 +318,8 @@ public class WalletService {
         approver.setBalance(approver.getBalance().subtract(request.getAmount()));
         userRepository.save(approver);
 
+        notifyDepositApproved(request);
+
         log.info("Coin request {} approved by {} — deducted from approver balance", requestId, approverId);
     }
 
@@ -322,6 +339,9 @@ public class WalletService {
             transaction.setStatus(TransactionStatus.FAILED);
             transactionRepository.save(transaction);
         }
+
+        CoinRequest request = coinRequestRepository.findById(requestId).orElse(null);
+        notifyDepositRejected(request, reason);
 
         log.info("Coin request {} rejected by {}: {}", requestId, approverId, reason);
     }
@@ -393,6 +413,8 @@ public class WalletService {
 
         AdminFundRequest saved = adminFundRequestRepository.save(request);
 
+        notifyFundRequestCreated(saved);
+
         log.info("Admin {} requested fund of amount {} from super admin", adminUserId, amount);
         return saved;
     }
@@ -437,6 +459,8 @@ public class WalletService {
         recordTenantLedger(request.getAdminUserId(), request.getAdminUserId(), TransactionType.DEPOSIT,
                 request.getAmount(), requestId, "Fund request approved by super admin");
 
+        notifyFundRequestApproved(admin, request.getAmount(), requestId);
+
         log.info("Admin fund request {} approved by super admin {} — admin {} funded with {}",
                 requestId, superAdminId, request.getAdminUserId(), request.getAmount());
     }
@@ -474,6 +498,11 @@ public class WalletService {
             throw new RequestAlreadyProcessedException("Request already processed");
         }
 
+        var rejectedRequest = adminFundRequestRepository.findById(requestId).orElse(null);
+        if (rejectedRequest != null) {
+            notifyFundRequestRejected(rejectedRequest.getAdminUserId(), rejectedRequest.getAmount(), reason);
+        }
+
         log.info("Admin fund request {} rejected by super admin {}: {}", requestId, superAdminId, reason);
     }
 
@@ -505,6 +534,8 @@ public class WalletService {
 
         createTransaction(playerId, TransactionType.WIN, amount,
                 TransactionStatus.COMPLETED, gameId, "Won from game " + gameId);
+
+        notifyGameWin(playerId, amount, gameId);
     }
 
     @Transactional(transactionManager = "tenantTransactionManager")
@@ -525,6 +556,8 @@ public class WalletService {
 
         createTransaction(adminUserId, TransactionType.AGENT_COMMISSION, amount,
                 TransactionStatus.COMPLETED, gameId, "Agent commission from game " + gameId);
+
+        notifyCommissionCredited(adminUserId, amount, gameId);
     }
 
 
@@ -547,5 +580,153 @@ public class WalletService {
                 .build();
 
         transactionRepository.save(transaction);
+    }
+
+    // =========================================================
+    // NOTIFICATION HELPERS
+    // =========================================================
+
+    private String fmt(BigDecimal amount) {
+        return amount.stripTrailingZeros().toPlainString();
+    }
+
+    private String playerDisplayName(Long userId) {
+        return userRepository.findById(userId)
+                .map(u -> {
+                    if (u.getFirstName() != null && !u.getFirstName().isBlank()) {
+                        return u.getFirstName() + (u.getLastName() != null && !u.getLastName().isBlank() ? " " + u.getLastName() : "");
+                    }
+                    return u.getUsername() != null ? u.getUsername() : "Player #" + userId;
+                })
+                .orElse("Player #" + userId);
+    }
+
+    private void notify(Long userId, String type, String title, String body,
+                        String referenceType, Long referenceId, String telegramText) {
+        try {
+            notificationService.notify(userId, type, title, body, referenceType, referenceId, telegramText);
+        } catch (Exception e) {
+            log.warn("Failed to create notification (type={}, userId={}): {}", type, userId, e.getMessage());
+        }
+    }
+
+    private void notifyDepositRequested(Player player, CoinRequest request) {
+        Long adminUserId = player.getAdminUserId();
+        if (adminUserId == null) return;
+        String playerName = playerDisplayName(request.getUserId());
+        notify(adminUserId, "DEPOSIT_REQUEST",
+                "New deposit request",
+                playerName + " requested a deposit of " + fmt(request.getAmount()) + " coins.",
+                "COIN_REQUEST", request.getId(),
+                "\uD83D\uDCC8 Deposit request\n" + playerName + " wants " + fmt(request.getAmount()) + " coins. Approve it in the app.");
+    }
+
+    private void notifyDepositApproved(CoinRequest request) {
+        String amount = fmt(request.getAmount());
+        notify(request.getUserId(), "DEPOSIT_APPROVED",
+                "Deposit approved",
+                "Your deposit of " + amount + " coins has been approved and credited to your balance.",
+                "COIN_REQUEST", request.getId(),
+                "\u2705 Deposit approved\n" + amount + " coins have been added to your balance. Good luck!");
+    }
+
+    private void notifyDepositRejected(CoinRequest request, String reason) {
+        if (request == null) return;
+        String amount = fmt(request.getAmount());
+        String why = (reason == null || reason.isBlank()) ? "Please contact support." : reason;
+        notify(request.getUserId(), "DEPOSIT_REJECTED",
+                "Deposit rejected",
+                "Your deposit of " + amount + " coins was rejected. Reason: " + why,
+                "COIN_REQUEST", request.getId(),
+                "\u274C Deposit rejected\n" + amount + " coins request was declined.\nReason: " + why);
+    }
+
+    private void notifyWithdrawalRequested(Player player, Withdrawal withdrawal) {
+        Long adminUserId = player.getAdminUserId();
+        if (adminUserId == null) return;
+        String playerName = playerDisplayName(withdrawal.getUserId());
+        notify(adminUserId, "WITHDRAWAL_REQUEST",
+                "New withdrawal request",
+                playerName + " requested a withdrawal of " + fmt(withdrawal.getAmount()) + " coins.",
+                "WITHDRAWAL", withdrawal.getId(),
+                "\uD83D\uDCB5 Withdrawal request\n" + playerName + " wants to withdraw " + fmt(withdrawal.getAmount()) + " coins. Review it in the app.");
+    }
+
+    private void notifyWithdrawalApproved(Withdrawal withdrawal) {
+        String amount = fmt(withdrawal.getAmount());
+        notify(withdrawal.getUserId(), "WITHDRAWAL_APPROVED",
+                "Withdrawal paid",
+                "Your withdrawal of " + amount + " coins has been approved and paid out.",
+                "WITHDRAWAL", withdrawal.getId(),
+                "\u2705 Withdrawal paid\n" + amount + " coins have been paid out. Thank you for playing!");
+    }
+
+    private void notifyWithdrawalRejected(Withdrawal withdrawal, String reason) {
+        String amount = fmt(withdrawal.getAmount());
+        String why = (reason == null || reason.isBlank()) ? "Please contact support." : reason;
+        notify(withdrawal.getUserId(), "WITHDRAWAL_REJECTED",
+                "Withdrawal rejected",
+                "Your withdrawal of " + amount + " coins was rejected. Reason: " + why,
+                "WITHDRAWAL", withdrawal.getId(),
+                "\u274C Withdrawal rejected\n" + amount + " coins.\nReason: " + why);
+    }
+
+    private void notifyPlayerFunded(Long playerId, Long adminUserId, BigDecimal amount) {
+        notify(playerId, "PLAYER_FUNDED",
+                "You received coins",
+                "You received " + fmt(amount) + " coins from " + playerDisplayName(adminUserId) + ".",
+                null, null,
+                "\uD83D\uDCB0 Coins credited\n" + fmt(amount) + " coins have been added to your balance.");
+    }
+
+    private void notifyAdminFunded(Long adminUserId, BigDecimal amount) {
+        notify(adminUserId, "ADMIN_FUNDED",
+                "Funds added",
+                "Your balance was topped up by " + fmt(amount) + " coins.",
+                null, null,
+                "\uD83D\uDCB0 Funds added\n" + fmt(amount) + " coins have been credited to your account.");
+    }
+
+    private void notifyFundRequestCreated(AdminFundRequest request) {
+        String adminName = playerDisplayName(request.getAdminUserId());
+        String amount = fmt(request.getAmount());
+        for (User superAdmin : userRepository.findAllByRole(Role.SUPER_ADMIN)) {
+            notify(superAdmin.getId(), "FUND_REQUEST",
+                    "Admin fund request",
+                    adminName + " requested " + amount + " coins.",
+                    "ADMIN_FUND_REQUEST", request.getId(), null);
+        }
+    }
+
+    private void notifyFundRequestApproved(User admin, BigDecimal amount, Long requestId) {
+        notify(admin.getId(), "FUND_REQUEST_APPROVED",
+                "Fund request approved",
+                "Your request for " + fmt(amount) + " coins was approved and credited.",
+                "ADMIN_FUND_REQUEST", requestId,
+                "\u2705 Fund request approved\n" + fmt(amount) + " coins have been credited to your account.");
+    }
+
+    private void notifyFundRequestRejected(Long adminUserId, BigDecimal requestAmount, String reason) {
+        String why = (reason == null || reason.isBlank()) ? "Please contact support." : reason;
+        notify(adminUserId, "FUND_REQUEST_REJECTED",
+                "Fund request rejected",
+                "Your fund request for " + fmt(requestAmount) + " coins was rejected. Reason: " + why,
+                null, null,
+                "\u274C Fund request rejected\n" + fmt(requestAmount) + " coins.\nReason: " + why);
+    }
+
+    private void notifyGameWin(Long playerId, BigDecimal amount, Long gameId) {
+        notify(playerId, "WIN",
+                "You won!",
+                "Congratulations! You won " + fmt(amount) + " coins.",
+                "GAME", gameId,
+                "\uD83C\uDF89 You won!\n" + fmt(amount) + " coins were credited to your balance. Congrats!");
+    }
+
+    private void notifyCommissionCredited(Long adminUserId, BigDecimal amount, Long gameId) {
+        notify(adminUserId, "COMMISSION_CREDITED",
+                "Commission credited",
+                "You earned " + fmt(amount) + " coins in commission.",
+                "GAME", gameId, null);
     }
 }
