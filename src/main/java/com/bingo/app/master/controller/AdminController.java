@@ -3,9 +3,13 @@ package com.bingo.app.master.controller;
 import com.bingo.app.infrastructure.security.UserPrincipal;
 import com.bingo.app.master.dto.mapper.MasterMapper;
 import com.bingo.app.master.dto.request.AdminStatusRequest;
+import com.bingo.app.master.dto.request.AdminWarningRequest;
 import com.bingo.app.master.dto.request.CreateAdminFundRequest;
 import com.bingo.app.master.dto.response.AdminFundRequestResponse;
 import com.bingo.app.master.dto.response.AdminListItem;
+import com.bingo.app.master.dto.response.AdminWarningResponse;
+import com.bingo.app.master.dto.response.AgentStatsResponse;
+import com.bingo.app.master.entity.AdminWarning;
 import com.bingo.app.common.dto.ApiResponse;
 import com.bingo.app.master.enums.Role;
 import com.bingo.app.master.service.InviteService;
@@ -17,6 +21,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -51,9 +56,40 @@ public class AdminController {
         var admin = switch (request.status().toUpperCase()) {
             case "APPROVE" -> userService.approveAdmin(adminUserId);
             case "REJECT" -> userService.rejectAdmin(adminUserId);
+            case "SUSPEND" -> userService.suspendAdmin(adminUserId);
+            case "RESUME" -> userService.resumeAdmin(adminUserId);
             default -> throw new IllegalArgumentException("Unknown status: " + request.status());
         };
         return ApiResponse.ok("Admin status updated", admin);
+    }
+
+    @PostMapping("/{adminUserId}/warn")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ApiResponse<AdminWarningResponse> warnAdmin(
+            @PathVariable Long adminUserId,
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody AdminWarningRequest request) {
+        AdminWarning warning = userService.warnAdmin(adminUserId, request.reason(), principal.getUser().getId());
+        return ApiResponse.ok("Admin warned", toWarningResponse(warning));
+    }
+
+    @GetMapping("/{adminUserId}/warnings")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ApiResponse<List<AdminWarningResponse>> listWarnings(@PathVariable Long adminUserId) {
+        return ApiResponse.ok(userService.getWarningsForAdmin(adminUserId).stream()
+                .map(this::toWarningResponse).toList());
+    }
+
+    @GetMapping("/{adminUserId}/stats")
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    public ApiResponse<AgentStatsResponse> agentStats(@PathVariable Long adminUserId) {
+        return ApiResponse.ok(userService.getAgentStats(adminUserId));
+    }
+
+    private AdminWarningResponse toWarningResponse(AdminWarning w) {
+        return new AdminWarningResponse(
+                w.getId(), w.getAdminUserId(), w.getReason(),
+                w.getCreatedBy(), w.getCreatedAt() != null ? w.getCreatedAt() : LocalDateTime.now());
     }
 
     @PostMapping("/fund-requests")

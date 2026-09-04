@@ -174,7 +174,7 @@ public class WalletService {
         List<Player> players = playerRepository.findByAdminUserId(adminUserId);
         List<Long> playerIds = players.stream().map(Player::getUserId).toList();
 
-        return withdrawalRepository.findByUserIdInAndStatus(playerIds, RequestStatus.PENDING).stream()
+        return withdrawalRepository.findByUserIdInOrderByCreatedAtDesc(playerIds).stream()
                 .map(tenantMapper::toDto)
                 .toList();
     }
@@ -726,7 +726,24 @@ public class WalletService {
     private void notifyCommissionCredited(Long adminUserId, BigDecimal amount, Long gameId) {
         notify(adminUserId, "COMMISSION_CREDITED",
                 "Commission credited",
-                "You earned " + fmt(amount) + " coins in commission.",
+                "You earned " + fmt(amount) + " coins as commission from Game #" + gameId + ".",
                 "GAME", gameId, null);
     }
+
+    /**
+     * Total commission earned by the current tenant's agent (scoped to the active
+     * tenant context). Used for platform-level super-admin reporting.
+     */
+    @Transactional(transactionManager = "tenantTransactionManager", readOnly = true)
+    public BigDecimal getTotalCommissionInTenant() {
+        return sumAmounts(transactionRepository.findByType(TransactionType.AGENT_COMMISSION.name()))
+                .add(sumAmounts(transactionRepository.findByType(TransactionType.UNCLAIMED_PRIZE.name())));
+    }
+
+    private BigDecimal sumAmounts(List<Transaction> txns) {
+        return txns.stream()
+                .map(Transaction::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
 }

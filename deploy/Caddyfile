@@ -1,0 +1,6 @@
+{$BINGO_DOMAIN} {
+	encode gzip
+
+	# Backend serves REST API, /ws (WebSocket + SockJS) and swagger.
+	reverse_proxy backend:8080
+}

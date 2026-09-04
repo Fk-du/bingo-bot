@@ -5,6 +5,7 @@ import com.bingo.app.master.entity.TenantRegistry;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.repository.TenantRegistryRepository;
 import com.bingo.app.master.repository.UserRepository;
+import com.bingo.app.master.service.NotificationService;
 import com.bingo.app.tenant.dto.mapper.TenantMapper;
 import com.bingo.app.tenant.dto.response.BingoClaimResponse;
 import com.bingo.app.tenant.entity.*;
@@ -56,6 +57,7 @@ public class GameEngineService {
     private final TenantMapper tenantMapper;
     private final TenantRegistryRepository tenantRegistryRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
 
     @Value("${bingo.fees.admin-commission-percent:10}")
@@ -463,6 +465,8 @@ public class GameEngineService {
                 .claimedAt(LocalDateTime.now())
                 .build();
         bingoClaimRepository.save(claim);
+
+        notifyAdminOfClaim(game, playerId, claim);
 
         publishClaimPendingEvent(gameId, claim);
 
@@ -1193,6 +1197,37 @@ public class GameEngineService {
         ObjectNode data = objectMapper.createObjectNode();
         data.put("status", status.name());
         publishEvent(gameId, "CLAIM_RESOLVED", data);
+    }
+
+    /**
+     * Notify the game's admin that a player claimed Bingo so they can review it,
+     * even when they are in a different part of the app.
+     */
+    private void notifyAdminOfClaim(Game game, Long playerId, BingoClaim claim) {
+        if (game.getAdminUserId() == null) return;
+        String playerName = playerName(playerId);
+        try {
+            notificationService.notify(
+                    game.getAdminUserId(),
+                    "CLAIM_PENDING",
+                    "Bingo claim pending",
+                    playerName + " claimed Bingo in Game #" + game.getId() + ". Review the claim.",
+                    "GAME", game.getId(),
+                    "🎯 Bingo claim!\n" + playerName + " claimed in Game #" + game.getId() + ". Open the app to approve or reject.");
+        } catch (Exception e) {
+            log.warn("Failed to notify admin of claim: {}", e.getMessage());
+        }
+    }
+
+    private String playerName(Long playerId) {
+        return userRepository.findById(playerId)
+                .map(u -> {
+                    if (u.getFirstName() != null && !u.getFirstName().isBlank()) {
+                        return u.getFirstName() + (u.getLastName() != null && !u.getLastName().isBlank() ? " " + u.getLastName() : "");
+                    }
+                    return u.getUsername() != null ? u.getUsername() : "Player #" + playerId;
+                })
+                .orElse("Player #" + playerId);
     }
 
     /**

@@ -6,11 +6,19 @@ import com.bingo.app.master.dto.mapper.MasterMapper;
 import com.bingo.app.master.dto.request.CreateAdminRequest;
 import com.bingo.app.master.dto.request.CreatePlayerRequest;
 import com.bingo.app.master.dto.response.AdminListItem;
+import com.bingo.app.master.dto.response.AgentStatsResponse;
 import com.bingo.app.master.dto.response.UserProfileResponse;
+import com.bingo.app.master.entity.AdminWarning;
 import com.bingo.app.master.entity.User;
 import com.bingo.app.master.enums.Role;
+import com.bingo.app.master.repository.AdminWarningRepository;
+import com.bingo.app.master.repository.TenantRegistryRepository;
 import com.bingo.app.master.repository.UserRepository;
+import com.bingo.app.tenant.dto.response.GameResponse;
+import com.bingo.app.tenant.enums.GameStatus;
+import com.bingo.app.tenant.service.GameService;
 import com.bingo.app.tenant.service.PlayerService;
+import com.bingo.app.tenant.service.WalletService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,19 +38,31 @@ public class UserService {
     private final MasterMapper masterMapper;
     private final ObjectProvider<InviteService> inviteServiceProvider;
     private final NotificationService notificationService;
+    private final AdminWarningRepository adminWarningRepository;
+    private final TenantRegistryRepository tenantRegistryRepository;
+    private final GameService gameService;
+    private final WalletService walletService;
 
     public UserService(UserRepository userRepository,
                        TenantManagementService tenantManagementService,
                        PlayerService playerService,
                        MasterMapper masterMapper,
                        ObjectProvider<InviteService> inviteServiceProvider,
-                       NotificationService notificationService) {
+                       NotificationService notificationService,
+                       AdminWarningRepository adminWarningRepository,
+                       TenantRegistryRepository tenantRegistryRepository,
+                       GameService gameService,
+                       WalletService walletService) {
         this.userRepository = userRepository;
         this.tenantManagementService = tenantManagementService;
         this.playerService = playerService;
         this.masterMapper = masterMapper;
         this.inviteServiceProvider = inviteServiceProvider;
         this.notificationService = notificationService;
+        this.adminWarningRepository = adminWarningRepository;
+        this.tenantRegistryRepository = tenantRegistryRepository;
+        this.gameService = gameService;
+        this.walletService = walletService;
     }
 
     @Value("${app.super-admin.telegram-id}")
@@ -157,6 +177,124 @@ public class UserService {
                 null, null, null);
 
         return result;
+    }
+
+    @Transactional
+    public AdminListItem suspendAdmin(Long adminUserId) {
+        User admin = requireAdmin(adminUserId);
+        admin.setActive(false);
+        AdminListItem result = masterMapper.toAdminListItem(userRepository.save(admin));
+
+        // Freeze the agent's operation: halt any open games in their tenant so
+        // their players can no longer join, call, or claim. Players are separate
+        // User rows (role PLAYER) and are not blocked by the admin's own 403, so
+        // we must end the open games explicitly to stop them.
+        String tenantId = TenantContext.tenantKeyForAdmin(adminUserId);
+        TenantContext.setTenant(tenantId);
+        try {
+            List<Long> openGameIds = gameService.findOpenGamesForAdmin(adminUserId).stream()
+                    .map(GameResponse::id)
+                    .toList();
+            for (Long gameId : openGameIds) {
+                try {
+                    gameService.endGameManually(gameId, adminUserId);
+                    log.info("Suspended admin {} -> ended game {}", adminUserId, gameId);
+                } catch (RuntimeException e) {
+                    log.warn("Failed to end game {} on admin suspension: {}", gameId, e.getMessage());
+                }
+            }
+        } finally {
+            TenantContext.clear();
+        }
+
+        notificationService.notify(admin.getId(), "ADMIN_SUSPENDED",
+                "Account suspended",
+                "Your admin account has been suspended by the platform. All your active games were ended. Contact the owner for details.",
+                null, null,
+                "⏸️ Account suspended\nYour admin account was suspended and your active games were ended. Contact the platform owner.");
+
+        // Notify the agent's players that their room is frozen.
+        List<User> players = userRepository.findAllByAdminUserId(adminUserId);
+        for (User player : players) {
+            notificationService.notify(player.getId(), "ADMIN_SUSPENDED",
+                    "Agent suspended",
+                    "Your agent account has been suspended. All games are frozen until further notice.",
+                    null, null,
+                    "⏸️ Your agent account was suspended. Games are frozen until further notice.");
+        }
+
+        return result;
+    }
+
+    @Transactional
+    public AdminListItem resumeAdmin(Long adminUserId) {
+        User admin = requireAdmin(adminUserId);
+        admin.setActive(true);
+        AdminListItem result = masterMapper.toAdminListItem(userRepository.save(admin));
+
+        notificationService.notify(admin.getId(), "ADMIN_RESUMED",
+                "Account resumed",
+                "Your admin account has been resumed. You can continue managing your bingo room.",
+                null, null,
+                "▶️ Account resumed\nYour admin account is active again.");
+
+        return result;
+    }
+
+    @Transactional
+    public AdminWarning warnAdmin(Long adminUserId, String reason, Long createdBy) {
+        User admin = requireAdmin(adminUserId);
+        AdminWarning warning = AdminWarning.builder()
+                .adminUserId(adminUserId)
+                .reason(reason)
+                .createdBy(createdBy)
+                .build();
+        AdminWarning saved = adminWarningRepository.save(warning);
+
+        notificationService.notify(admin.getId(), "ADMIN_WARNING",
+                "Warning from platform",
+                "You have received a warning: " + reason,
+                null, null,
+                "⚠️ Warning\n" + reason);
+
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public List<AdminWarning> getWarningsForAdmin(Long adminUserId) {
+        return adminWarningRepository.findByAdminUserIdOrderByCreatedAtDesc(adminUserId);
+    }
+
+    /**
+     * Platform-level stats for a single agent, aggregated from that agent's tenant schema.
+     */
+    public AgentStatsResponse getAgentStats(Long adminUserId) {
+        User admin = requireAdmin(adminUserId);
+        String tenantId = TenantContext.tenantKeyForAdmin(adminUserId);
+        TenantContext.setTenant(tenantId);
+        try {
+            long totalGames = gameService.getAllGamesForAdmin(adminUserId).size();
+            long endedGames = gameService.getAllGamesForAdmin(adminUserId).stream()
+                    .filter(g -> g.status() == GameStatus.ENDED)
+                    .count();
+            long totalPlayers = playerService.getPlayersByAdmin(adminUserId).size();
+            long totalTransactions = walletService.getAllTransactions().size();
+            BigDecimal totalCommission = walletService.getTotalCommissionInTenant();
+            return new AgentStatsResponse(
+                    totalGames, endedGames, totalPlayers, totalTransactions,
+                    totalCommission, admin.getBalance());
+        } finally {
+            TenantContext.clear();
+        }
+    }
+
+    private User requireAdmin(Long adminUserId) {
+        User admin = userRepository.findById(adminUserId)
+                .orElseThrow(() -> new RuntimeException("Admin not found: " + adminUserId));
+        if (admin.getRole() != Role.ADMIN) {
+            throw new RuntimeException("User is not an admin: " + adminUserId);
+        }
+        return admin;
     }
 
     public User createPlayer(CreatePlayerRequest request) {

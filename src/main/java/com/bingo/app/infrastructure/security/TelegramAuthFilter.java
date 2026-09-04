@@ -1,6 +1,8 @@
 package com.bingo.app.infrastructure.security;
 
 import com.bingo.app.infrastructure.persistence.TenantHelper;
+import com.bingo.app.master.entity.User;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -35,6 +38,18 @@ public class TelegramAuthFilter extends OncePerRequestFilter {
                     var user = telegramAuthService.authenticate(initData);
 
                 if (user != null) {
+                    // Enforce account status at the request boundary. This project
+                    // authenticates via a stateless filter that bypasses
+                    // DaoAuthenticationProvider, so UserDetails.isEnabled() is
+                    // never consulted. We must reject inactive admins here, otherwise
+                    // a suspended/disabled admin keeps ROLE_ADMIN and full access.
+                    if (!UserPrincipal.isActiveAndEnabled(user)) {
+                        log.warn("Blocked rejected/inactive user: {} (role={}, active={})",
+                                user.getTelegramId(), user.getRole(), user.isActive());
+                        writeForbidden(response, user);
+                        return;
+                    }
+
                     UserPrincipal principal = new UserPrincipal(user);
                     UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
@@ -52,5 +67,19 @@ public class TelegramAuthFilter extends OncePerRequestFilter {
         } finally {
             TenantHelper.clear();
         }
+    }
+
+    private void writeForbidden(HttpServletResponse response, User user)
+            throws IOException {
+        String message = "Account is suspended";
+        String userMessage = "Your account has been suspended. Contact the platform owner for details.";
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        response.setContentType("application/json");
+        response.getWriter().write(new ObjectMapper().writeValueAsString(
+                Map.of(
+                        "message", message,
+                        "userMessage", userMessage,
+                        "status", HttpServletResponse.SC_FORBIDDEN
+                )));
     }
 }
