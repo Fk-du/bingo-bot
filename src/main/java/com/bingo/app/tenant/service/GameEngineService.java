@@ -147,6 +147,10 @@ public class GameEngineService {
 
         int interval = game.getCallInterval() != null ? game.getCallInterval() : 5;
 
+        // Initial delay is set to `interval` (not 0): the scheduleAtFixedRate task starts
+        // on a separate thread, and without the delay the first tick can read the game's
+        // status *before* the STARTING->IN_PROGRESS transition commit is visible, hitting
+        // the status guard below and cancelling the scheduler forever.
         ScheduledFuture<?> future = taskScheduler.scheduleAtFixedRate(() -> {
             TenantContext.setTenant(tenantId);
             try {
@@ -159,7 +163,7 @@ public class GameEngineService {
             } finally {
                 TenantContext.clear();
             }
-        }, 0, interval, java.util.concurrent.TimeUnit.SECONDS);
+        }, interval, interval, java.util.concurrent.TimeUnit.SECONDS);
 
         activeGameTasks.put(gameId, future);
 
@@ -326,8 +330,16 @@ public class GameEngineService {
                 .orElseThrow(() -> new RuntimeException("Game not found"));
 
         if (game.getStatus() != GameStatus.IN_PROGRESS) {
-            log.debug("Game {} is not in progress, stopping caller", gameId);
-            stopCalling(gameId);
+            // STARTING is only ever observed here as a stale read of a status change
+            // that is still mid-transaction (the scheduleAtFixedRate first tick already
+            // waits one `interval` for the commit, but belt-and-braces never hurt);
+            // do NOT cancel the scheduler for it or number calling dies permanently.
+            // Every other status means calling is legitimately over (paused / claim
+            // pending / registration open / ended), so shut the caller down.
+            if (game.getStatus() != GameStatus.STARTING) {
+                log.debug("Game {} is not calling ({}), stopping caller", gameId, game.getStatus());
+                stopCalling(gameId);
+            }
             return null;
         }
 
@@ -1080,6 +1092,7 @@ public class GameEngineService {
                             .playerName(name)
                             .cardNumbers(parseCardNumbers(claim.getCardSnapshot()))
                             .calledNumbers(calledNumberRepository.findCalledNumbersByGameId(gameId))
+                            .claimedAt(claim.getClaimedAt())
                             .build();
                 })
                 .toList();
