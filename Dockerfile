@@ -10,7 +10,7 @@ COPY mvnw mvnw.cmd .mvn ./
 RUN chmod +x mvnw
 COPY src ./src
 
-RUN mvn -B -q -DskipTests package
+RUN mvn -B -q -Dmaven.test.skip=true package
 
 # ---- runtime stage ----
 FROM eclipse-temurin:21-jre
